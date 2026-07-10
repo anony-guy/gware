@@ -5,6 +5,9 @@
 #include "parser.h"
 #include "eval.h"
 #include "transpiler.h"
+#include "updater.h"
+
+#define GWARE_VERSION "v0.0.0.1"
 
 void run_script(char* input, int isWeb) {
     Lexer* l = Lexer_create(input);
@@ -32,16 +35,22 @@ int main(int argc, char** argv) {
         printf("       gware.exe --web <script.gweb>\n");
         printf("       gware.exe --version\n");
         printf("       gware.exe --web-version\n");
+        printf("       gware.exe --update\n");
         return 1;
     }
 
     if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-        printf("Gware Engine v0.0.0.1\n");
+        printf("Gware Engine %s\n", GWARE_VERSION);
         return 0;
     }
     
     if (strcmp(argv[1], "--web-version") == 0) {
-        printf("GwareWeb Transcompiler v0.0.0.1\n");
+        printf("GwareWeb Transcompiler %s\n", GWARE_VERSION);
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "--update") == 0) {
+        check_and_apply_update(GWARE_VERSION);
         return 0;
     }
     
