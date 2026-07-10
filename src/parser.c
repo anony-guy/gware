@@ -97,6 +97,20 @@ static ASTNode* parsePrimary(Parser* p) {
     return node;
 }
 
+static ASTNode* parseArrayLiteral(Parser* p) {
+    ASTNode* arrayNode = ASTNode_create(AST_ARRAY_LITERAL);
+    nextToken(p); // consume '['
+    while (p->curToken.type != TOKEN_RBRACKET && p->curToken.type != TOKEN_EOF) {
+        ASTNode* expr = parseExpression(p, 0); // LOWEST precedence
+        if (expr) ASTNode_addStatement(arrayNode, expr);
+        nextToken(p); // consume expr
+        if (p->curToken.type == TOKEN_COMMA) {
+            nextToken(p); // consume ','
+        }
+    }
+    return arrayNode;
+}
+
 static ASTNode* parseExpression(Parser* p, int precedence) {
     ASTNode* left = parsePrimary(p);
     if (!left) return NULL;
@@ -321,7 +335,19 @@ static ASTNode* parseUIElement(Parser* p) {
     }
     
     if (p->curToken.type == TOKEN_LBRACE) {
-        el->right = parseBlockStatement(p); // body block containing inner elements or show()
+        ASTNode* block = ASTNode_create(AST_BLOCK_STATEMENT);
+        nextToken(p); // consume {
+        while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
+            if (p->curToken.type == TOKEN_SHOW) {
+                ASTNode* exprStmt = parseExpressionStatement(p);
+                if (exprStmt) ASTNode_addStatement(block, exprStmt);
+            } else {
+                ASTNode* subEl = parseUIElement(p);
+                if (subEl) ASTNode_addStatement(block, subEl);
+            }
+        }
+        if (p->curToken.type == TOKEN_RBRACE) nextToken(p);
+        el->right = block; // body block containing inner elements or show()
     }
     return el;
 }

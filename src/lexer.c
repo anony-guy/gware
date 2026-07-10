@@ -148,6 +148,7 @@ Token Lexer_nextToken(Lexer* l) {
         case '[': tok = newToken(TOKEN_LBRACKET, "["); break;
         case ']': tok = newToken(TOKEN_RBRACKET, "]"); break;
         case ':': tok = newToken(TOKEN_COLON, ":"); break;
+
         case ',': tok = newToken(TOKEN_COMMA, ","); break;
         case '"':
             tok.literal = readString(l);

@@ -1,0 +1,12 @@
+component Main {
+    set todos = ["Buy groceries", "Write Gware compiler", "Fix lexer bug"]
+    
+    view {
+        h1 { show("Todo List") }
+        ul {
+            for(in: todos, as: todo) {
+                li { show(todo) }
+            }
+        }
+    }
+}

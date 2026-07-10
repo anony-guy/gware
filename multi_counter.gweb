@@ -1,0 +1,24 @@
+component Counter {
+    set clicks = 0
+    
+    action increment {
+        set clicks = clicks + 1
+    }
+    
+    view {
+        button(onClick: increment) {
+            show("Clicks: ")
+            show(clicks)
+        }
+    }
+}
+
+component Main {
+    view {
+        div {
+            h1 { show("Multi-Counter Test") }
+            Counter(clicks: "10")
+            Counter(clicks: "50")
+        }
+    }
+}
