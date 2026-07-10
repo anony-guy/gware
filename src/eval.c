@@ -2,6 +2,8 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "color.h"
 
 static jmp_buf jmp_stack[64];
 static int jmp_stack_ptr = -1;
@@ -15,7 +17,8 @@ void throw_error(const char* fmt, ...) {
     if (jmp_stack_ptr >= 0) {
         longjmp(jmp_stack[jmp_stack_ptr], 1);
     } else {
-        throw_error("%s", last_error_msg);
+        printf(ANSI_COLOR_RED "Runtime Error: %s\n" ANSI_COLOR_RESET, last_error_msg);
+        exit(1);
     }
 }
 
@@ -24,13 +27,27 @@ void throw_error(const char* fmt, ...) {
 #include <stdio.h>
 #include "color.h"
 #include "net.h"
+#include "json_api.h"
 
-static Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
-static Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
-static Value createString(char* s) { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = strdup(s); return v; }
-static Value createFunction(ASTNode* func) { Value v; v.type = VAL_FUNCTION; v.is_return = 0; v.as.func_val = func; return v; }
+Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
+Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
+Value createString(char* s) { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = strdup(s); return v; }
+Value createFunction(ASTNode* func) { Value v; v.type = VAL_FUNCTION; v.is_return = 0; v.as.func_val = func; return v; }
 
-static Value createArray(int capacity) {
+
+Value createObject(int capacity) {
+    Value v; 
+    v.type = VAL_OBJECT; 
+    v.is_return = 0; 
+    v.as.obj_val = (ValueObject*)malloc(sizeof(ValueObject));
+    v.as.obj_val->count = 0;
+    v.as.obj_val->capacity = capacity > 0 ? capacity : 4;
+    v.as.obj_val->keys = (char**)malloc(sizeof(char*) * v.as.obj_val->capacity);
+    v.as.obj_val->values = (Value*)malloc(sizeof(Value) * v.as.obj_val->capacity);
+    return v;
+}
+
+Value createArray(int capacity) {
     Value v; 
     v.type = VAL_ARRAY; 
     v.is_return = 0; 
@@ -91,6 +108,16 @@ Value native_fetch(int argCount, Value* args) {
 
 void Value_free(Value v) {
     if (v.type == VAL_STRING && v.as.str_val) free(v.as.str_val);
+    
+    if (v.type == VAL_OBJECT && v.as.obj_val) {
+        for (int i = 0; i < v.as.obj_val->count; i++) {
+            free(v.as.obj_val->keys[i]);
+            Value_free(v.as.obj_val->values[i]);
+        }
+        free(v.as.obj_val->keys);
+        free(v.as.obj_val->values);
+        free(v.as.obj_val);
+    }
     if (v.type == VAL_ARRAY && v.as.arr_val) {
         for (int i = 0; i < v.as.arr_val->count; i++) {
             Value_free(v.as.arr_val->elements[i]);
@@ -104,7 +131,19 @@ Value Value_copy(Value v) {
     Value copy = v;
     if (v.type == VAL_STRING && v.as.str_val) {
         copy.as.str_val = strdup(v.as.str_val);
-    } else if (v.type == VAL_ARRAY && v.as.arr_val) {
+    } else 
+    if (v.type == VAL_OBJECT && v.as.obj_val) {
+        copy.as.obj_val = (ValueObject*)malloc(sizeof(ValueObject));
+        copy.as.obj_val->count = v.as.obj_val->count;
+        copy.as.obj_val->capacity = v.as.obj_val->capacity;
+        copy.as.obj_val->keys = (char**)malloc(sizeof(char*) * copy.as.obj_val->capacity);
+        copy.as.obj_val->values = (Value*)malloc(sizeof(Value) * copy.as.obj_val->capacity);
+        for (int i = 0; i < copy.as.obj_val->count; i++) {
+            copy.as.obj_val->keys[i] = strdup(v.as.obj_val->keys[i]);
+            copy.as.obj_val->values[i] = Value_copy(v.as.obj_val->values[i]);
+        }
+    }
+    if (v.type == VAL_ARRAY && v.as.arr_val) {
         copy.as.arr_val = (ValueArray*)malloc(sizeof(ValueArray));
         copy.as.arr_val->count = v.as.arr_val->count;
         copy.as.arr_val->capacity = v.as.arr_val->capacity;
@@ -140,6 +179,8 @@ Environment* Environment_create(Environment* parent) {
         Environment_set(env, "read_file", createNativeFunction(native_read_file), NULL);
         Environment_set(env, "write_file", createNativeFunction(native_write_file), NULL);
         Environment_set(env, "fetch", createNativeFunction(native_fetch), NULL);
+        Environment_set(env, "json_parse", createNativeFunction(native_json_parse), NULL);
+        Environment_set(env, "json_stringify", createNativeFunction(native_json_stringify), NULL);
     }
     return env;
 }
@@ -214,6 +255,8 @@ void Environment_destroy(Environment* env) {
 static int isTruthy(Value v) {
     if (v.type == VAL_INT) return v.as.int_val != 0;
     if (v.type == VAL_STRING) return v.as.str_val && strlen(v.as.str_val) > 0;
+    
+    if (v.type == VAL_OBJECT) return v.as.obj_val && v.as.obj_val->count > 0;
     if (v.type == VAL_ARRAY) return v.as.arr_val && v.as.arr_val->count > 0;
     return 1;
 }
@@ -241,20 +284,40 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 }
                 char* varName = node->left->left->value;
                 Value* ref = Environment_get_ref(env, varName);
-                if (!ref || ref->type != VAL_ARRAY) {
-                    throw_error("Cannot index non-array variable '%s'", varName);
+                if (!ref || (ref->type != VAL_ARRAY && ref->type != VAL_OBJECT)) {
+                    throw_error("Cannot index non-array/object variable '%s'", varName);
                 }
                 Value idxVal = Eval_node(node->left->right, env);
-                if (idxVal.type != VAL_INT) {
-                    throw_error("Array index must be an integer");
-                }
-                int idx = idxVal.as.int_val;
-                if (idx < 0 || idx >= ref->as.arr_val->count) {
-                    throw_error("Array assignment out of bounds");
-                }
                 Value newVal = Eval_node(node->right, env);
-                Value_free(ref->as.arr_val->elements[idx]);
-                ref->as.arr_val->elements[idx] = Value_copy(newVal);
+                if (ref->type == VAL_ARRAY) {
+                    if (idxVal.type != VAL_INT) throw_error("Array index must be an integer");
+                    int idx = idxVal.as.int_val;
+                    if (idx < 0 || idx >= ref->as.arr_val->count) throw_error("Array assignment out of bounds");
+                    Value_free(ref->as.arr_val->elements[idx]);
+                    ref->as.arr_val->elements[idx] = Value_copy(newVal);
+                } else if (ref->type == VAL_OBJECT) {
+                    if (idxVal.type != VAL_STRING) throw_error("Object key must be a string");
+                    char* key = idxVal.as.str_val;
+                    int found = 0;
+                    for (int i = 0; i < ref->as.obj_val->count; i++) {
+                        if (strcmp(ref->as.obj_val->keys[i], key) == 0) {
+                            Value_free(ref->as.obj_val->values[i]);
+                            ref->as.obj_val->values[i] = Value_copy(newVal);
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        if (ref->as.obj_val->count >= ref->as.obj_val->capacity) {
+                            ref->as.obj_val->capacity *= 2;
+                            ref->as.obj_val->keys = realloc(ref->as.obj_val->keys, sizeof(char*) * ref->as.obj_val->capacity);
+                            ref->as.obj_val->values = realloc(ref->as.obj_val->values, sizeof(Value) * ref->as.obj_val->capacity);
+                        }
+                        ref->as.obj_val->keys[ref->as.obj_val->count] = strdup(key);
+                        ref->as.obj_val->values[ref->as.obj_val->count] = Value_copy(newVal);
+                        ref->as.obj_val->count++;
+                    }
+                }
                 return newVal;
             } else {
                 Value val = Eval_node(node->right, env);
@@ -343,10 +406,21 @@ Value Eval_node(ASTNode* node, Environment* env) {
         
         case AST_INDEX_EXPRESSION: {
             Value arrVal = Eval_node(node->left, env);
-            if (arrVal.type != VAL_ARRAY && arrVal.type != VAL_STRING) {
-                throw_error("Cannot index a non-array/string");
+            if (arrVal.type != VAL_ARRAY && arrVal.type != VAL_STRING && arrVal.type != VAL_OBJECT) {
+                throw_error("Cannot index a non-array/string/object");
             }
             Value idxVal = Eval_node(node->right, env);
+            if (arrVal.type == VAL_OBJECT) {
+                if (idxVal.type != VAL_STRING) throw_error("Object index must be a string");
+                char* key = idxVal.as.str_val;
+                for (int i = 0; i < arrVal.as.obj_val->count; i++) {
+                    if (strcmp(arrVal.as.obj_val->keys[i], key) == 0) {
+                        return Value_copy(arrVal.as.obj_val->values[i]);
+                    }
+                }
+                return createNull();
+            }
+            
             if (idxVal.type != VAL_INT) {
                 throw_error("Index must be an integer");
             }
@@ -404,6 +478,9 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 if (val.type == VAL_INT) printf("%d\n", val.as.int_val);
                 else if (val.type == VAL_STRING) printf("%s\n", val.as.str_val ? val.as.str_val : "null");
                 else if (val.type == VAL_ARRAY) printf("[Array count=%d]\n", val.as.arr_val->count);
+
+                else if (val.type == VAL_OBJECT) printf("[Object keys=%d]\n", val.as.obj_val->count);
+
                 return val;
             }
             throw_error("unknown function '%s'", node->left->value);

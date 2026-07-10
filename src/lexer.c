@@ -76,15 +76,29 @@ static char* readNumber(Lexer* l) {
 
 static char* readString(Lexer* l) {
     int startPosition = l->position + 1; // skip the first "
+    int capacity = 32;
+    int len = 0;
+    char* str = (char*)malloc(capacity);
+    
     while (1) {
         Lexer_readChar(l);
         if (l->ch == '"' || l->ch == 0) {
             break;
         }
+        if (l->ch == '\\') {
+            Lexer_readChar(l); // skip the backslash
+            // basic translation
+            if (l->ch == 'n') l->ch = '\n';
+            else if (l->ch == 't') l->ch = '\t';
+            else if (l->ch == 'r') l->ch = '\r';
+            // otherwise just keep the escaped char (e.g., ")
+        }
+        str[len++] = l->ch;
+        if (len >= capacity - 1) {
+            capacity *= 2;
+            str = realloc(str, capacity);
+        }
     }
-    int len = l->position - startPosition;
-    char* str = (char*)malloc(len + 1);
-    strncpy(str, l->input + startPosition, len);
     str[len] = '\0';
     return str;
 }

@@ -1,0 +1,3 @@
+show("Testing json_parse")
+set data = json_parse("{\"name\":\"test\"}")
+show(data)

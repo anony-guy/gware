@@ -1,0 +1,18 @@
+set str = "{\"name\":\"Gware\",\"version\":4,\"features\":[\"json\",\"net\"]}"
+set data = json_parse(str)
+
+show("Parsed Name:")
+show(data["name"])
+
+show("Parsed Version:")
+show(data["version"])
+
+show("Parsed Feature 1:")
+show(data["features"][0])
+
+show("Setting new key...")
+set data["language"] = "C"
+show(data["language"])
+
+show("Stringifying back:")
+show(json_stringify(data))

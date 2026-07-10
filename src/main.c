@@ -8,24 +8,23 @@
 #include "updater.h"
 #include "color.h"
 
-#define GWARE_VERSION "v0.0.0.3"
+#define GWARE_VERSION "v0.0.0.4"
 
 void run_script(char* input, int isWeb) {
     Lexer* l = Lexer_create(input);
     Parser* p = Parser_create(l);
     
-    ASTNode* program = Parser_parseProgram(p);
+    ASTNode* ast = Parser_parseProgram(p);
     
     if (isWeb) {
-        Transpile_to_html(program, "index.html");
+        Transpile_to_html(ast, "index.html");
     } else {
         Environment* env = Environment_create(NULL);
-        Eval_node(program, env);
+        Eval_node(ast, env);
         Environment_destroy(env);
     }
     
-    // Clean up
-    ASTNode_destroy(program);
+    ASTNode_destroy(ast);
     Parser_destroy(p);
     Lexer_destroy(l);
 }
