@@ -6,6 +6,7 @@
 #include "eval.h"
 #include "transpiler.h"
 #include "updater.h"
+#include "color.h"
 
 #define GWARE_VERSION "v0.0.0.2"
 
@@ -30,6 +31,7 @@ void run_script(char* input, int isWeb) {
 }
 
 int main(int argc, char** argv) {
+    enableColors();
     if (argc < 2) {
         printf("Usage: gware.exe <script.gw>\n");
         printf("       gware.exe --web <script.gweb>\n");
@@ -40,12 +42,12 @@ int main(int argc, char** argv) {
     }
 
     if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-        printf("Gware Engine %s\n", GWARE_VERSION);
+        printf(ANSI_COLOR_CYAN "Gware Engine %s\n" ANSI_COLOR_RESET, GWARE_VERSION);
         return 0;
     }
     
     if (strcmp(argv[1], "--web-version") == 0) {
-        printf("GwareWeb Transcompiler %s\n", GWARE_VERSION);
+        printf(ANSI_COLOR_CYAN "GwareWeb Transcompiler %s\n" ANSI_COLOR_RESET, GWARE_VERSION);
         return 0;
     }
     
@@ -59,7 +61,7 @@ int main(int argc, char** argv) {
     
     if (strcmp(argv[1], "--web") == 0) {
         if (argc < 3) {
-            printf("Error: Expected filename after --web\n");
+            printf(ANSI_COLOR_RED "Error: Expected filename after --web\n" ANSI_COLOR_RESET);
             return 1;
         }
         isWeb = 1;
@@ -68,7 +70,7 @@ int main(int argc, char** argv) {
     
     FILE* file = fopen(filename, "rb");
     if (!file) {
-        printf("Error: Could not open file %s\n", filename);
+        printf(ANSI_COLOR_RED "Error: Could not open file %s\n" ANSI_COLOR_RESET, filename);
         return 1;
     }
     

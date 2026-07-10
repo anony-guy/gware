@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "color.h"
 
 enum {
     PREC_LOWEST = 1,
@@ -90,7 +91,7 @@ static ASTNode* parsePrimary(Parser* p) {
         }
         if (p->curToken.type == TOKEN_RBRACKET) nextToken(p);
     } else {
-        printf("Parse error: expected identifier, number, or string, got type %d ('%s')\n", p->curToken.type, p->curToken.literal);
+        printf(ANSI_COLOR_RED "Parse error: expected identifier, number, or string, got type %d ('%s')\n" ANSI_COLOR_RESET, p->curToken.type, p->curToken.literal);
         nextToken(p);
     }
     return node;
@@ -136,14 +137,14 @@ static ASTNode* parseSetStatement(Parser* p) {
     }
     
     if (p->curToken.type != TOKEN_IDENTIFIER) {
-        printf("Parse error: expected identifier after set\n");
+        printf(ANSI_COLOR_RED "Parse error: expected identifier after set\n" ANSI_COLOR_RESET);
         return NULL;
     }
     
     stmt->left = parseExpression(p, PREC_LOWEST);
     
     if (p->curToken.type != TOKEN_ASSIGN) {
-        printf("Parse error: expected =\n");
+        printf(ANSI_COLOR_RED "Parse error: expected =\n" ANSI_COLOR_RESET);
         return NULL;
     }
     nextToken(p); 

@@ -1,5 +1,6 @@
 #include "transpiler.h"
 #include <stdio.h>
+#include "color.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -90,7 +91,7 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, FILE* out) {
 void Transpile_to_html(ASTNode* program, const char* outputFile) {
     FILE* out = fopen(outputFile, "w");
     if (!out) {
-        printf("Error: Could not open output file %s\n", outputFile);
+        printf(ANSI_COLOR_RED "Error: Could not open output file %s\n" ANSI_COLOR_RESET, outputFile);
         return;
     }
 
@@ -159,5 +160,5 @@ void Transpile_to_html(ASTNode* program, const char* outputFile) {
     
     fprintf(out, "</script>\n</body>\n</html>\n");
     fclose(out);
-    printf("Successfully transpiled to %s\n", outputFile);
+    printf(ANSI_COLOR_GREEN "Successfully transpiled to %s\n" ANSI_COLOR_RESET, outputFile);
 }

@@ -1,5 +1,6 @@
 #include "updater.h"
 #include <stdio.h>
+#include "color.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,12 +13,12 @@ void trim_whitespace(char* str) {
 }
 
 void check_and_apply_update(const char* current_version) {
-    printf("Checking GitHub for updates...\n");
+    printf(ANSI_COLOR_YELLOW "Checking GitHub for updates...\n" ANSI_COLOR_RESET);
     
     // Fetch latest release tag via PowerShell
     FILE* fp = popen("powershell -noprofile -Command \"try { (Invoke-RestMethod https://api.github.com/repos/anony-guy/gware/releases/latest).tag_name } catch { echo 'NOT_FOUND' }\"", "r");
     if (!fp) {
-        printf("Error: Could not connect to GitHub.\n");
+        printf(ANSI_COLOR_RED "Error: Could not connect to GitHub.\n" ANSI_COLOR_RESET);
         return;
     }
     
@@ -27,18 +28,18 @@ void check_and_apply_update(const char* current_version) {
     trim_whitespace(latest_version);
     
     if (strlen(latest_version) == 0 || strcmp(latest_version, "NOT_FOUND") == 0) {
-        printf("No releases found on the GitHub repository yet.\n");
-        printf("Make sure to publish a Release on GitHub before attempting an update!\n");
+        printf(ANSI_COLOR_YELLOW "No releases found on the GitHub repository yet.\n" ANSI_COLOR_RESET);
+        printf(ANSI_COLOR_YELLOW "Make sure to publish a Release on GitHub before attempting an update!\n" ANSI_COLOR_RESET);
         return;
     }
     
     if (strcmp(latest_version, current_version) == 0) {
-        printf("You are already on the latest version (%s). No update required!\n", current_version);
+        printf(ANSI_COLOR_GREEN "You are already on the latest version (%s). No update required!\n" ANSI_COLOR_RESET, current_version);
         return;
     }
     
-    printf("New version found: %s (Current: %s)\n", latest_version, current_version);
-    printf("Downloading update...\n");
+    printf(ANSI_COLOR_CYAN "New version found: %s (Current: %s)\n" ANSI_COLOR_RESET, latest_version, current_version);
+    printf(ANSI_COLOR_YELLOW "Downloading update...\n" ANSI_COLOR_RESET);
     
     // Download the new executable (assuming the asset is named gware.exe)
     char cmd[512];
@@ -46,16 +47,16 @@ void check_and_apply_update(const char* current_version) {
     
     int result = system(cmd);
     if (result != 0) {
-        printf("Error: Failed to download the update. Does the release contain a 'gware.exe' asset?\n");
+        printf(ANSI_COLOR_RED "Error: Failed to download the update. Does the release contain a 'gware.exe' asset?\n" ANSI_COLOR_RESET);
         return;
     }
     
-    printf("Download complete! Applying update...\n");
+    printf(ANSI_COLOR_GREEN "Download complete! Applying update...\n" ANSI_COLOR_RESET);
     
     // Create the batch script for the hot-swap
     FILE* bat = fopen("update.bat", "w");
     if (!bat) {
-        printf("Error: Could not create update script.\n");
+        printf(ANSI_COLOR_RED "Error: Could not create update script.\n" ANSI_COLOR_RESET);
         return;
     }
     
