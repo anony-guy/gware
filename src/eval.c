@@ -22,15 +22,15 @@ void throw_error(const char* fmt, ...) {
     }
 }
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include "color.h"
 #include "net.h"
+#include <string.h>
 #include "json_api.h"
 #include "sqlite_api.h"
 #include "tcp_api.h"
+#include "lexer.h"
+#include "parser.h"
 
+int has_error = 0;
 Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
 Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
 Value createString(char* s) { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = strdup(s); return v; }
@@ -99,14 +99,80 @@ Value native_write_file(int argCount, Value* args) {
 
 Value native_fetch(int argCount, Value* args) {
     if (argCount != 1 || args[0].type != VAL_STRING) {
-        throw_error("fetch expects 1 string argument (URL)");
+        throw_error("fetch expects (url)");
     }
     char* res = fetch_url(args[0].as.str_val);
-    if (!res) throw_error("Failed to fetch URL: %s", args[0].as.str_val);
+    if (!res) return createNull();
     Value v = createString(res);
     free(res);
     return v;
 }
+
+// --- String Stdlib ---
+Value native_string_length(int argCount, Value* args) {
+    if (argCount != 1 || args[0].type != VAL_STRING) throw_error("string_length expects 1 string");
+    return createInt(args[0].as.str_val ? strlen(args[0].as.str_val) : 0);
+}
+
+Value native_string_concat(int argCount, Value* args) {
+    if (argCount != 2 || args[0].type != VAL_STRING || args[1].type != VAL_STRING) throw_error("string_concat expects 2 strings");
+    char* s1 = args[0].as.str_val ? args[0].as.str_val : "";
+    char* s2 = args[1].as.str_val ? args[1].as.str_val : "";
+    char* res = malloc(strlen(s1) + strlen(s2) + 1);
+    strcpy(res, s1);
+    strcat(res, s2);
+    Value v = createString(res);
+    free(res);
+    return v;
+}
+
+Value native_string_split(int argCount, Value* args) {
+    if (argCount != 2 || args[0].type != VAL_STRING || args[1].type != VAL_STRING) throw_error("string_split expects (string, delimiter)");
+    char* str = args[0].as.str_val ? args[0].as.str_val : "";
+    char* delim = args[1].as.str_val ? args[1].as.str_val : "";
+    
+    Value arr = createArray(4);
+    if (strlen(str) == 0) return arr;
+    
+    char* temp = strdup(str);
+    char* token = strtok(temp, delim);
+    while (token) {
+        if (arr.as.arr_val->count >= arr.as.arr_val->capacity) {
+            arr.as.arr_val->capacity *= 2;
+            arr.as.arr_val->elements = realloc(arr.as.arr_val->elements, sizeof(Value) * arr.as.arr_val->capacity);
+        }
+        arr.as.arr_val->elements[arr.as.arr_val->count++] = createString(token);
+        token = strtok(NULL, delim);
+    }
+    free(temp);
+    return arr;
+}
+
+Value native_string_replace(int argCount, Value* args) {
+    if (argCount != 3 || args[0].type != VAL_STRING || args[1].type != VAL_STRING || args[2].type != VAL_STRING) {
+        throw_error("string_replace expects (string, target, replacement)");
+    }
+    char* str = args[0].as.str_val ? args[0].as.str_val : "";
+    char* target = args[1].as.str_val;
+    char* replacement = args[2].as.str_val ? args[2].as.str_val : "";
+    if (!target || strlen(target) == 0) return createString(str);
+    
+    char* pos = strstr(str, target);
+    if (!pos) return createString(str);
+    
+    int new_len = strlen(str) - strlen(target) + strlen(replacement);
+    char* res = malloc(new_len + 1);
+    int prefix_len = pos - str;
+    strncpy(res, str, prefix_len);
+    res[prefix_len] = '\0';
+    strcat(res, replacement);
+    strcat(res, pos + strlen(target));
+    
+    Value v = createString(res);
+    free(res);
+    return v;
+}
+
 
 void Value_free(Value v) {
     if (v.type == VAL_STRING && v.as.str_val) free(v.as.str_val);
@@ -190,6 +256,13 @@ Environment* Environment_create(Environment* parent) {
         Environment_set(env, "fetch", createNativeFunction(native_fetch), NULL);
         Environment_set(env, "json_parse", createNativeFunction(native_json_parse), NULL);
         Environment_set(env, "json_stringify", createNativeFunction(native_json_stringify), NULL);
+        
+        // String Stdlib
+        Environment_set(env, "string_length", createNativeFunction(native_string_length), NULL);
+        Environment_set(env, "string_concat", createNativeFunction(native_string_concat), NULL);
+        Environment_set(env, "string_split", createNativeFunction(native_string_split), NULL);
+        Environment_set(env, "string_replace", createNativeFunction(native_string_replace), NULL);
+
         register_sqlite_api(env);
         register_tcp_api(env);
     }
@@ -311,6 +384,39 @@ Value Eval_node(ASTNode* node, Environment* env) {
             return result;
         }
             
+        case AST_IMPORT_STATEMENT: {
+            if (!node->value) return createNull();
+            char* filename = node->value;
+            FILE* fp = fopen(filename, "r");
+            if (!fp) {
+                char err[512];
+                snprintf(err, sizeof(err), "Import error: Could not open file '%s'", filename);
+                throw_error(err);
+                return createNull();
+            }
+            fseek(fp, 0, SEEK_END);
+            long fsize = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            char* source = malloc(fsize + 1);
+            fread(source, 1, fsize, fp);
+            source[fsize] = 0;
+            fclose(fp);
+
+            Lexer* l = Lexer_create(source);
+            Parser* p = Parser_create(l);
+            ASTNode* program = Parser_parseProgram(p);
+            
+            Value result = createNull();
+            if (program) {
+                result = Eval_node(program, env); // Evaluate in the current environment
+                // No ASTNode_destroy since eval doesn't clean it up
+            }
+            
+            free(source);
+            // Parser/Lexer are leaked here since no proper free functions, which is fine for now
+            return result;
+        }
+            
         case AST_SET_STATEMENT: {
             if (node->left->type == AST_INDEX_EXPRESSION) {
                 if (node->left->left->type != AST_IDENTIFIER) {
@@ -375,7 +481,7 @@ Value Eval_node(ASTNode* node, Environment* env) {
             if (!found) {
                 throw_error("Undefined variable '%s'", node->value);
             }
-            return val;
+            return Value_copy(val);
         }
         
         case AST_IF_STATEMENT: {

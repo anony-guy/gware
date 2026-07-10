@@ -153,7 +153,25 @@ static void emitUpdateLoops(ASTNode* block, char* instanceId, FILE* out) {
     if (!block) return;
     for (int i = 0; i < block->statementCount; i++) {
         ASTNode* el = block->statements[i];
-        if (el->type == AST_UI_ELEMENT) {
+        if (el->type == AST_IF_STATEMENT) {
+            char* ifId = el->typeAnnotation;
+            if (ifId) {
+                fprintf(out, "    {\n");
+                fprintf(out, "        let container = document.getElementById('%s');\n", ifId);
+                fprintf(out, "        if (container) {\n");
+                fprintf(out, "            if (");
+                emitJSExpr(el->left, instanceId, out);
+                fprintf(out, ") {\n");
+                fprintf(out, "                container.innerHTML = `");
+                emitJSTemplate(el->right, instanceId, NULL, out);
+                fprintf(out, "`;\n");
+                fprintf(out, "            } else {\n");
+                fprintf(out, "                container.innerHTML = '';\n");
+                fprintf(out, "            }\n");
+                fprintf(out, "        }\n");
+                fprintf(out, "    }\n");
+            }
+        } else if (el->type == AST_UI_ELEMENT) {
             if (strcmp(el->value, "for") == 0) {
                 char* inAttr = NULL;
                 char* asAttr = NULL;
@@ -193,6 +211,12 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, char* instanceId, A
             } else if (arg->type == AST_IDENTIFIER) {
                 fprintf(out, "<span id=\"var_%s_%s\"></span> ", instanceId, arg->value);
             }
+        } else if (el->type == AST_IF_STATEMENT) {
+            if (!el->typeAnnotation) {
+                el->typeAnnotation = malloc(256);
+                sprintf(el->typeAnnotation, "if_%d", loopCounter++);
+            }
+            fprintf(out, "<div id=\"%s\"></div>\n", el->typeAnnotation);
         } else if (el->type == AST_UI_ELEMENT) {
             if (strcmp(el->value, "for") == 0) {
                 if (!el->typeAnnotation) {

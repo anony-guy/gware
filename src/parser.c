@@ -53,6 +53,7 @@ void Parser_destroy(Parser* p) {
 static ASTNode* parseExpression(Parser* p, int precedence);
 static ASTNode* parseStatement(Parser* p);
 static ASTNode* parseBlockStatement(Parser* p);
+static ASTNode* parseUIIfStatement(Parser* p);
 
 static ASTNode* parsePrimary(Parser* p) {
     ASTNode* node = NULL;
@@ -257,6 +258,18 @@ static ASTNode* parseTryStatement(Parser* p) {
     return stmt;
 }
 
+static ASTNode* parseImportStatement(Parser* p) {
+    ASTNode* stmt = ASTNode_create(AST_IMPORT_STATEMENT);
+    nextToken(p); // consume 'import'
+    if (p->curToken.type == TOKEN_STRING) {
+        stmt->value = strdup(p->curToken.literal);
+        nextToken(p); // consume string
+    } else {
+        printf(ANSI_COLOR_RED "Parse error: import expects a string literal\n" ANSI_COLOR_RESET);
+    }
+    return stmt;
+}
+
 static ASTNode* parseExpressionStatement(Parser* p) {
     if (p->curToken.type == TOKEN_SHOW) {
         ASTNode* stmt = ASTNode_create(AST_EXPRESSION_STATEMENT);
@@ -341,6 +354,9 @@ static ASTNode* parseUIElement(Parser* p) {
             if (p->curToken.type == TOKEN_SHOW) {
                 ASTNode* exprStmt = parseExpressionStatement(p);
                 if (exprStmt) ASTNode_addStatement(block, exprStmt);
+            } else if (p->curToken.type == TOKEN_IF) {
+                ASTNode* ifStmt = parseUIIfStatement(p);
+                if (ifStmt) ASTNode_addStatement(block, ifStmt);
             } else {
                 ASTNode* subEl = parseUIElement(p);
                 if (subEl) ASTNode_addStatement(block, subEl);
@@ -352,6 +368,31 @@ static ASTNode* parseUIElement(Parser* p) {
     return el;
 }
 
+static ASTNode* parseUIIfStatement(Parser* p) {
+    ASTNode* stmt = ASTNode_create(AST_IF_STATEMENT);
+    nextToken(p); // consume 'if'
+    stmt->left = parseExpression(p, PREC_LOWEST);
+    if (p->curToken.type == TOKEN_LBRACE) {
+        ASTNode* block = ASTNode_create(AST_BLOCK_STATEMENT);
+        nextToken(p); // consume {
+        while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
+            if (p->curToken.type == TOKEN_SHOW) {
+                ASTNode* exprStmt = parseExpressionStatement(p);
+                if (exprStmt) ASTNode_addStatement(block, exprStmt);
+            } else if (p->curToken.type == TOKEN_IF) {
+                ASTNode* ifStmt = parseUIIfStatement(p);
+                if (ifStmt) ASTNode_addStatement(block, ifStmt);
+            } else {
+                ASTNode* subEl = parseUIElement(p);
+                if (subEl) ASTNode_addStatement(block, subEl);
+            }
+        }
+        if (p->curToken.type == TOKEN_RBRACE) nextToken(p);
+        stmt->right = block;
+    }
+    return stmt;
+}
+
 static ASTNode* parseViewDeclaration(Parser* p) {
     ASTNode* view = ASTNode_create(AST_VIEW_DECLARATION);
     nextToken(p); // consume 'view'
@@ -359,6 +400,8 @@ static ASTNode* parseViewDeclaration(Parser* p) {
     while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
         if (p->curToken.type == TOKEN_SHOW) {
             ASTNode_addStatement(view, parseExpressionStatement(p));
+        } else if (p->curToken.type == TOKEN_IF) {
+            ASTNode_addStatement(view, parseUIIfStatement(p));
         } else {
             ASTNode_addStatement(view, parseUIElement(p));
         }
@@ -398,6 +441,7 @@ static ASTNode* parseStatement(Parser* p) {
     if (p->curToken.type == TOKEN_DEF) return parseFunctionDeclaration(p);
     if (p->curToken.type == TOKEN_RETURN) return parseReturnStatement(p);
     if (p->curToken.type == TOKEN_TRY) return parseTryStatement(p);
+    if (p->curToken.type == TOKEN_IMPORT) return parseImportStatement(p);
     if (p->curToken.type == TOKEN_COMPONENT) return parseComponentDeclaration(p);
     return parseExpressionStatement(p);
 }

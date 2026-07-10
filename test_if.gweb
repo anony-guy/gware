@@ -1,0 +1,16 @@
+component Counter {
+    set show_text = 1
+
+    action toggle {
+        if show_text > 0 {
+            set show_text = 0
+        }
+    }
+
+    view {
+        button(onClick: toggle) { show("Toggle Text") }
+        if show_text > 0 {
+            div { show("The text is visible!") }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+set db = sqlite_open("test_bind.db")
+
+sqlite_exec(db, "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+sqlite_exec(db, "DELETE FROM users")
+
+set user_name = "Alice' OR '1'='1"
+set user_age = 25
+
+sqlite_exec(db, "INSERT INTO users (name, age) VALUES (?, ?)", [user_name, user_age])
+sqlite_exec(db, "INSERT INTO users (name, age) VALUES (?, ?)", ["Bob", 30])
+
+set rows = sqlite_query(db, "SELECT * FROM users WHERE name = ?", [user_name])
+show("Parameterized query result for 'Alice OR 1=1':")
+show(rows)
+
+sqlite_close(db)

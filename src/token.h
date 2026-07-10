@@ -37,6 +37,7 @@ typedef enum {
     TOKEN_RETURN,
     TOKEN_TYPE_INT,
     TOKEN_TYPE_STRING,
+    TOKEN_IMPORT,
 
     // GwareWeb Keywords
     TOKEN_TRY,

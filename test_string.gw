@@ -1,0 +1,17 @@
+show("start")
+set s = "hello world"
+show(string_length(s))
+
+show("before concat")
+set s2 = string_concat(s, " test")
+show(s2)
+
+show("before replace")
+set s3 = string_replace(s2, "world", "universe")
+show(s3)
+
+show("before split")
+set arr = string_split(s3, " ")
+show(arr)
+
+show("done")

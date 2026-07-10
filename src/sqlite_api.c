@@ -31,29 +31,56 @@ static Value native_sqlite_open(int argCount, Value* args) {
 }
 
 static Value native_sqlite_exec(int argCount, Value* args) {
-    if (argCount != 2 || args[0].type != VAL_INT || args[1].type != VAL_STRING) {
-        throw_error("sqlite_exec expects (db_handle, query_string)");
+    if (argCount < 2 || args[0].type != VAL_INT || args[1].type != VAL_STRING) {
+        throw_error("sqlite_exec expects (db_handle, query_string, [bindings])");
     }
     sqlite3* db = (sqlite3*)args[0].as.ptr_val;
-    char* err_msg = NULL;
-    if (sqlite3_exec(db, args[1].as.str_val, 0, 0, &err_msg) != SQLITE_OK) {
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db, args[1].as.str_val, -1, &stmt, NULL) != SQLITE_OK) {
+        throw_error("SQL error: %s", sqlite3_errmsg(db));
+    }
+    
+    if (argCount >= 3 && args[2].type == VAL_ARRAY) {
+        ValueArray* bind_args = args[2].as.arr_val;
+        for (int i = 0; i < bind_args->count; i++) {
+            Value val = bind_args->elements[i];
+            if (val.type == VAL_INT) sqlite3_bind_int(stmt, i + 1, val.as.int_val);
+            else if (val.type == VAL_STRING && val.as.str_val) sqlite3_bind_text(stmt, i + 1, val.as.str_val, -1, SQLITE_TRANSIENT);
+            else if (val.type == VAL_STRING && !val.as.str_val) sqlite3_bind_null(stmt, i + 1);
+        }
+    }
+    
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
         char err[512];
-        snprintf(err, sizeof(err), "SQL error: %s", err_msg);
-        sqlite3_free(err_msg);
+        snprintf(err, sizeof(err), "SQL step error: %s", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
         throw_error(err);
     }
+    
+    sqlite3_finalize(stmt);
     return createNull();
 }
 
 static Value native_sqlite_query(int argCount, Value* args) {
-    if (argCount != 2 || args[0].type != VAL_INT || args[1].type != VAL_STRING) {
-        throw_error("sqlite_query expects (db_handle, query_string)");
+    if (argCount < 2 || args[0].type != VAL_INT || args[1].type != VAL_STRING) {
+        throw_error("sqlite_query expects (db_handle, query_string, [bindings])");
     }
     sqlite3* db = (sqlite3*)args[0].as.ptr_val;
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db, args[1].as.str_val, -1, &stmt, NULL) != SQLITE_OK) {
         throw_error("Failed to execute query: %s", sqlite3_errmsg(db));
+    }
+    
+    if (argCount >= 3 && args[2].type == VAL_ARRAY) {
+        ValueArray* bind_args = args[2].as.arr_val;
+        for (int i = 0; i < bind_args->count; i++) {
+            Value val = bind_args->elements[i];
+            if (val.type == VAL_INT) sqlite3_bind_int(stmt, i + 1, val.as.int_val);
+            else if (val.type == VAL_STRING && val.as.str_val) sqlite3_bind_text(stmt, i + 1, val.as.str_val, -1, SQLITE_TRANSIENT);
+            else if (val.type == VAL_STRING && !val.as.str_val) sqlite3_bind_null(stmt, i + 1);
+        }
     }
     
     Value rows = createArray(4);

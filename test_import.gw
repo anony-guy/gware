@@ -1,0 +1,6 @@
+import "utils.gw"
+
+show("This is test_import.gw")
+say_hello("World")
+show("util_value is:")
+show(util_value)

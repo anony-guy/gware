@@ -14,9 +14,12 @@ void trim_whitespace(char* str) {
 
 void check_and_apply_update(const char* current_version) {
     printf(ANSI_COLOR_YELLOW "Checking GitHub for updates...\n" ANSI_COLOR_RESET);
-    
-    // Fetch latest release tag via PowerShell
+    // Fetch latest release tag
+#ifdef _WIN32
     FILE* fp = popen("powershell -noprofile -Command \"try { (Invoke-RestMethod https://api.github.com/repos/anony-guy/gware/releases/latest).tag_name } catch { echo 'NOT_FOUND' }\"", "r");
+#else
+    FILE* fp = popen("curl -s https://api.github.com/repos/anony-guy/gware/releases/latest | grep -o '\"tag_name\": \"[^\"]*' | cut -d'\"' -f4 || echo 'NOT_FOUND'", "r");
+#endif
     if (!fp) {
         printf(ANSI_COLOR_RED "Error: Could not connect to GitHub.\n" ANSI_COLOR_RESET);
         return;
@@ -40,19 +43,23 @@ void check_and_apply_update(const char* current_version) {
     
     printf(ANSI_COLOR_CYAN "New version found: %s (Current: %s)\n" ANSI_COLOR_RESET, latest_version, current_version);
     printf(ANSI_COLOR_YELLOW "Downloading update...\n" ANSI_COLOR_RESET);
-    
-    // Download the new executable (assuming the asset is named gware.exe)
+    // Download the new executable
     char cmd[512];
+#ifdef _WIN32
     sprintf(cmd, "powershell -noprofile -Command \"Invoke-WebRequest -Uri https://github.com/anony-guy/gware/releases/download/%s/gware.exe -OutFile gware.exe.new\"", latest_version);
+#else
+    sprintf(cmd, "curl -sL https://github.com/anony-guy/gware/releases/download/%s/gware_linux -o gware.new", latest_version);
+#endif
     
     int result = system(cmd);
     if (result != 0) {
-        printf(ANSI_COLOR_RED "Error: Failed to download the update. Does the release contain a 'gware.exe' asset?\n" ANSI_COLOR_RESET);
+        printf(ANSI_COLOR_RED "Error: Failed to download the update.\n" ANSI_COLOR_RESET);
         return;
     }
     
     printf(ANSI_COLOR_GREEN "Download complete! Applying update...\n" ANSI_COLOR_RESET);
     
+#ifdef _WIN32
     // Create the batch script for the hot-swap
     FILE* bat = fopen("update.bat", "w");
     if (!bat) {
@@ -73,5 +80,18 @@ void check_and_apply_update(const char* current_version) {
     
     // Execute the batch script asynchronously and exit immediately
     system("start /b update.bat");
+#else
+    FILE* sh = fopen("update.sh", "w");
+    if (!sh) return;
+    fprintf(sh, "#!/bin/sh\n");
+    fprintf(sh, "sleep 1\n");
+    fprintf(sh, "rm -f gware\n");
+    fprintf(sh, "mv gware.new gware\n");
+    fprintf(sh, "chmod +x gware\n");
+    fprintf(sh, "echo Update successful! You are now running %s.\n", latest_version);
+    fprintf(sh, "rm -- \"$0\"\n");
+    fclose(sh);
+    system("chmod +x update.sh && ./update.sh &");
+#endif
     exit(0);
 }

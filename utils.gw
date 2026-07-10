@@ -1,0 +1,5 @@
+def say_hello(name) {
+    show("Hello from utils.gw, " + name + "!")
+}
+
+set util_value = 100
