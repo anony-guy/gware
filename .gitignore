@@ -1,0 +1,20 @@
+# Executables and build output
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+*.dll
+*.so
+*.dylib
+build/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Temporary transcompiler output
+index.html

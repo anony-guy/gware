@@ -1,0 +1,16 @@
+show("--- Hybrid Type Test ---")
+
+show("1. Declaring static types:")
+set int age = 30
+show(age)
+
+set string greeting = "Hello!"
+show(greeting)
+
+show("2. Reassigning with matching dynamic type:")
+set age = 31
+show(age)
+
+show("3. Triggering Assignment Type Error (assigning string to int):")
+set age = "thirty-one"
+

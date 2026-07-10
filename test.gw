@@ -1,0 +1,19 @@
+set name = "Gware Engine"
+show("Welcome to: ")
+show(name)
+
+set math = 10 + 5 * 2
+show("10 + 5 * 2 = ")
+show(math)
+
+if math == 20 {
+    show("Operator Precedence works!")
+}
+
+set counter = 3
+show("Starting countdown loop:")
+while counter > 0 {
+    show(counter)
+    set counter = counter - 1
+}
+show("Done!")

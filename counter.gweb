@@ -1,0 +1,24 @@
+component Button {
+    set int clicks = 0
+    
+    action increment {
+        set clicks = clicks + 1
+    }
+
+    style {
+        background: "blue"
+        color: "white"
+        padding: "10px 20px"
+        border: "none"
+        border-radius: "5px"
+        cursor: "pointer"
+        font-size: "16px"
+    }
+
+    view {
+        button(onClick: increment) {
+            show("Clicks: ")
+            show(clicks)
+        }
+    }
+}
