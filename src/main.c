@@ -31,11 +31,17 @@ int main(int argc, char** argv) {
         printf("Usage: gware.exe <script.gw>\n");
         printf("       gware.exe --web <script.gweb>\n");
         printf("       gware.exe --version\n");
+        printf("       gware.exe --web-version\n");
         return 1;
     }
 
     if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
         printf("Gware Engine v0.0.0.1\n");
+        return 0;
+    }
+    
+    if (strcmp(argv[1], "--web-version") == 0) {
+        printf("GwareWeb Transcompiler v0.0.0.1\n");
         return 0;
     }
     
