@@ -28,6 +28,7 @@ typedef struct Value {
         struct ValueArray* arr_val;
         struct ValueObject* obj_val;
         NativeFn native_fn;
+        void* ptr_val;
     } as;
 } Value;
 
@@ -62,6 +63,8 @@ Value createString(char* s);
 Value createArray(int capacity);
 Value createObject(int capacity);
 
+Environment* get_global_env(void);
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv);
 Environment* Environment_create(Environment* parent);
 void Environment_set(Environment* env, char* name, Value value, char* typeAnnotation);
 Value Environment_get(Environment* env, char* name, int* found);
@@ -69,6 +72,7 @@ Value* Environment_get_ref(Environment* env, char* name);
 void Environment_destroy(Environment* env);
 
 Value Eval_node(struct ASTNode* node, Environment* env);
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv);
 void throw_error(const char* fmt, ...);
 
 #endif // EVAL_H

@@ -52,7 +52,7 @@ static void skipWhitespace(Lexer* l) {
 
 static char* readIdentifier(Lexer* l) {
     int startPosition = l->position;
-    while (isalpha(l->ch) || l->ch == '_') {
+    while (isalpha(l->ch) || l->ch == '_' || isdigit(l->ch)) {
         Lexer_readChar(l);
     }
     int len = l->position - startPosition;

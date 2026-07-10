@@ -28,6 +28,8 @@ void throw_error(const char* fmt, ...) {
 #include "color.h"
 #include "net.h"
 #include "json_api.h"
+#include "sqlite_api.h"
+#include "tcp_api.h"
 
 Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
 Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
@@ -165,6 +167,12 @@ static void checkTypeMatch(char* annotation, ValueType vtype, char* varName) {
     }
 }
 
+static Environment* global_env = NULL;
+
+Environment* get_global_env(void) {
+    return global_env;
+}
+
 Environment* Environment_create(Environment* parent) {
     Environment* env = (Environment*)malloc(sizeof(Environment));
     env->names = NULL;
@@ -176,11 +184,14 @@ Environment* Environment_create(Environment* parent) {
     
     // Register native functions in the global environment
     if (parent == NULL) {
+        global_env = env;
         Environment_set(env, "read_file", createNativeFunction(native_read_file), NULL);
         Environment_set(env, "write_file", createNativeFunction(native_write_file), NULL);
         Environment_set(env, "fetch", createNativeFunction(native_fetch), NULL);
         Environment_set(env, "json_parse", createNativeFunction(native_json_parse), NULL);
         Environment_set(env, "json_stringify", createNativeFunction(native_json_stringify), NULL);
+        register_sqlite_api(env);
+        register_tcp_api(env);
     }
     return env;
 }
@@ -259,6 +270,29 @@ static int isTruthy(Value v) {
     if (v.type == VAL_OBJECT) return v.as.obj_val && v.as.obj_val->count > 0;
     if (v.type == VAL_ARRAY) return v.as.arr_val && v.as.arr_val->count > 0;
     return 1;
+}
+
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv) {
+    if (funcVal.type == VAL_NATIVE_FUNCTION) {
+        return funcVal.as.native_fn(argCount, args);
+    }
+    if (funcVal.type == VAL_FUNCTION) {
+        ASTNode* funcNode = funcVal.as.func_val;
+        Environment* funcEnv = Environment_create(parentEnv);
+        for (int i = 0; i < funcNode->parameterCount; i++) {
+            Value argVal = (i < argCount) ? args[i] : createNull();
+            Environment_set(funcEnv, funcNode->parameters[i]->value, argVal, funcNode->parameters[i]->typeAnnotation);
+        }
+        Value res = Eval_node(funcNode->right, funcEnv);
+        Environment_destroy(funcEnv);
+        if (res.is_return) {
+            res.is_return = 0;
+            return res;
+        }
+        return res;
+    }
+    throw_error("Attempted to call a non-function");
+    return createNull();
 }
 
 Value Eval_node(ASTNode* node, Environment* env) {
@@ -480,7 +514,7 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 else if (val.type == VAL_ARRAY) printf("[Array count=%d]\n", val.as.arr_val->count);
 
                 else if (val.type == VAL_OBJECT) printf("[Object keys=%d]\n", val.as.obj_val->count);
-
+                fflush(stdout);
                 return val;
             }
             throw_error("unknown function '%s'", node->left->value);
@@ -493,35 +527,16 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 throw_error("Undefined function '%s'", node->value);
             }
             
-            if (funcVal.type == VAL_NATIVE_FUNCTION) {
-                Value* args = malloc(sizeof(Value) * node->parameterCount);
-                for (int i = 0; i < node->parameterCount; i++) {
-                    args[i] = Eval_node(node->parameters[i], env);
-                }
-                Value res = funcVal.as.native_fn(node->parameterCount, args);
-                for (int i = 0; i < node->parameterCount; i++) {
-                    Value_free(args[i]);
-                }
-                free(args);
-                return res;
-            }
-            
-            ASTNode* funcNode = funcVal.as.func_val;
-            if (node->parameterCount != funcNode->parameterCount) {
-                throw_error("Function '%s' expects %d arguments, but got %d", node->value, funcNode->parameterCount, node->parameterCount);
-            }
-            
-            Environment* funcEnv = Environment_create(env);
+            Value* args = malloc(sizeof(Value) * node->parameterCount);
             for (int i = 0; i < node->parameterCount; i++) {
-                Value argVal = Eval_node(node->parameters[i], env);
-                Environment_set(funcEnv, funcNode->parameters[i]->value, argVal, funcNode->parameters[i]->typeAnnotation);
+                args[i] = Eval_node(node->parameters[i], env);
             }
-            
-            Value result = Eval_node(funcNode->right, funcEnv);
-            result.is_return = 0; // Unwind the return flag
-            
-            Environment_destroy(funcEnv);
-            return result;
+            Value res = invokeFunction(funcVal, node->parameterCount, args, env);
+            for (int i = 0; i < node->parameterCount; i++) {
+                Value_free(args[i]);
+            }
+            free(args);
+            return res;
         }
     }
     return createNull();

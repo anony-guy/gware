@@ -1,0 +1,6 @@
+def handler(req) {
+    show("Received request!")
+    return "HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\nHello from Gware TCP!\n"
+}
+
+tcp_listen(8080, handler)

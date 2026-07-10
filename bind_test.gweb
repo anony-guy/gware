@@ -1,0 +1,11 @@
+component BindTest {
+    set name = "Gware"
+    
+    view {
+        h1 {
+            show("Hello, ")
+            show(name)
+        }
+        input(type: "text" bind: name)
+    }
+}

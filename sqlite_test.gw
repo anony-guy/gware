@@ -1,0 +1,12 @@
+set db = sqlite_open("test.db")
+sqlite_exec(db, "CREATE TABLE IF NOT EXISTS users (id INT, name TEXT)")
+sqlite_exec(db, "DELETE FROM users")
+sqlite_exec(db, "INSERT INTO users VALUES (1, 'Admin')")
+sqlite_exec(db, "INSERT INTO users VALUES (2, 'Guest')")
+
+set rows = sqlite_query(db, "SELECT * FROM users")
+show("Found rows:")
+show(rows[0]["name"])
+show(rows[1]["name"])
+
+sqlite_close(db)

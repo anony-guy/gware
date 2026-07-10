@@ -75,6 +75,8 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, FILE* out) {
                 ASTNode* attr = el->attributes[a];
                 if (strcmp(attr->propertyName, "onClick") == 0) {
                     fprintf(out, " onclick=\"%s()\"", attr->value);
+                } else if (strcmp(attr->propertyName, "bind") == 0) {
+                    fprintf(out, " id=\"var_%s_input\" oninput=\"%s = this.value; updateDOM()\"", attr->value, attr->value);
                 } else {
                     fprintf(out, " %s=\"%s\"", attr->propertyName, attr->value);
                 }
@@ -149,6 +151,8 @@ void Transpile_to_html(ASTNode* program, const char* outputFile) {
                     char* varName = comp->statements[j]->left->value;
                     fprintf(out, "    let el_%s = document.getElementById('var_%s');\n", varName, varName);
                     fprintf(out, "    if (el_%s) el_%s.innerText = %s;\n", varName, varName, varName);
+                    fprintf(out, "    let inp_%s = document.getElementById('var_%s_input');\n", varName, varName);
+                    fprintf(out, "    if (inp_%s && document.activeElement !== inp_%s) inp_%s.value = %s;\n", varName, varName, varName, varName);
                 }
             }
         }
