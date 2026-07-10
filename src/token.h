@@ -33,6 +33,8 @@ typedef enum {
     TOKEN_SHOW,
     TOKEN_IF,
     TOKEN_WHILE,
+    TOKEN_DEF,
+    TOKEN_RETURN,
     TOKEN_TYPE_INT,
     TOKEN_TYPE_STRING,
 
@@ -43,7 +45,12 @@ typedef enum {
     TOKEN_VIEW,
 
     // GwareWeb Symbols
-    TOKEN_COLON
+    TOKEN_COLON,
+    
+    // Punctuation
+    TOKEN_COMMA,
+    TOKEN_LBRACKET,
+    TOKEN_RBRACKET
 } TokenType;
 
 typedef struct {

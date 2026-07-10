@@ -18,7 +18,7 @@ void run_script(char* input, int isWeb) {
     if (isWeb) {
         Transpile_to_html(program, "index.html");
     } else {
-        Environment* env = Environment_create();
+        Environment* env = Environment_create(NULL);
         Eval_node(program, env);
         Environment_destroy(env);
     }

@@ -13,6 +13,11 @@ typedef enum {
     AST_IF_STATEMENT,
     AST_WHILE_STATEMENT,
     AST_BLOCK_STATEMENT,
+    AST_FUNCTION_DECLARATION,
+    AST_RETURN_STATEMENT,
+    AST_FUNCTION_CALL,
+    AST_ARRAY_LITERAL,
+    AST_INDEX_EXPRESSION,
     
     // GwareWeb Nodes
     AST_COMPONENT_DECLARATION,
@@ -41,11 +46,17 @@ typedef struct ASTNode {
     struct ASTNode** attributes; // Attributes like onClick
     int attributeCount;
     int attributeCapacity;
+    
+    // For Functions
+    struct ASTNode** parameters;
+    int parameterCount;
+    int parameterCapacity;
 } ASTNode;
 
 ASTNode* ASTNode_create(ASTNodeType type);
 void ASTNode_addStatement(ASTNode* parent, ASTNode* statement);
 void ASTNode_addAttribute(ASTNode* element, ASTNode* attribute);
+void ASTNode_addParameter(ASTNode* func, ASTNode* param);
 void ASTNode_destroy(ASTNode* node);
 
 #endif // AST_H

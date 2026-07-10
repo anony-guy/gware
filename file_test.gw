@@ -1,0 +1,7 @@
+show("Writing to file...")
+set success = write_file("test_io.txt", "Hello from Gware I/O!")
+show(success)
+
+show("Reading from file...")
+set content = read_file("test_io.txt")
+show(content)

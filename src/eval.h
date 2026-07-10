@@ -6,29 +6,44 @@
 typedef enum {
     VAL_INT,
     VAL_STRING,
-    VAL_NULL
+    VAL_FUNCTION,
+    VAL_ARRAY,
+    VAL_NATIVE_FUNCTION
 } ValueType;
 
-typedef struct {
+struct ValueArray;
+struct Value;
+
+typedef struct Value (*NativeFn)(int argCount, struct Value* args);
+
+typedef struct Value {
     ValueType type;
+    int is_return;
     union {
-        int i;
-        char* s;
-    } data;
+        int int_val;
+        char* str_val;
+        struct ASTNode* func_val;
+        struct ValueArray* arr_val;
+        NativeFn native_fn;
+    } as;
 } Value;
 
-typedef struct EnvVar {
-    char* name;
-    Value value;
-    char* typeAnnotation;
-    struct EnvVar* next;
-} EnvVar;
+typedef struct ValueArray {
+    Value* elements;
+    int count;
+    int capacity;
+} ValueArray;
 
-typedef struct {
-    EnvVar* head;
+typedef struct Environment {
+    char** names;
+    char** types;
+    Value* values;
+    int count;
+    int capacity;
+    struct Environment* parent;
 } Environment;
 
-Environment* Environment_create();
+Environment* Environment_create(Environment* parent);
 void Environment_set(Environment* env, char* name, Value value, char* typeAnnotation);
 Value Environment_get(Environment* env, char* name, int* found);
 void Environment_destroy(Environment* env);

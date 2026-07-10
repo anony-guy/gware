@@ -17,6 +17,10 @@ ASTNode* ASTNode_create(ASTNodeType type) {
     node->attributes = NULL;
     node->attributeCount = 0;
     node->attributeCapacity = 0;
+    
+    node->parameters = NULL;
+    node->parameterCount = 0;
+    node->parameterCapacity = 0;
     return node;
 }
 
@@ -34,6 +38,14 @@ void ASTNode_addAttribute(ASTNode* element, ASTNode* attribute) {
         element->attributes = (ASTNode**)realloc(element->attributes, sizeof(ASTNode*) * element->attributeCapacity);
     }
     element->attributes[element->attributeCount++] = attribute;
+}
+
+void ASTNode_addParameter(ASTNode* func, ASTNode* param) {
+    if (func->parameterCount >= func->parameterCapacity) {
+        func->parameterCapacity = func->parameterCapacity == 0 ? 4 : func->parameterCapacity * 2;
+        func->parameters = (ASTNode**)realloc(func->parameters, sizeof(ASTNode*) * func->parameterCapacity);
+    }
+    func->parameters[func->parameterCount++] = param;
 }
 
 void ASTNode_destroy(ASTNode* node) {
@@ -54,6 +66,12 @@ void ASTNode_destroy(ASTNode* node) {
             ASTNode_destroy(node->attributes[i]);
         }
         free(node->attributes);
+    }
+    if (node->parameters) {
+        for (int i = 0; i < node->parameterCount; i++) {
+            ASTNode_destroy(node->parameters[i]);
+        }
+        free(node->parameters);
     }
     free(node);
 }

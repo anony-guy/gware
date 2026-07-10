@@ -1,0 +1,16 @@
+def calculate_area(int width, int height) {
+    set result = width * height
+    return result
+}
+
+show("Calculating Area of 5 x 10:")
+set int area = calculate_area(5, 10)
+show(area)
+
+def say_hello(string name) {
+    show("Hello ")
+    show(name)
+    return 1
+}
+
+say_hello("Gware Engine!")

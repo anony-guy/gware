@@ -1,0 +1,13 @@
+set my_arr = [10, 20, "thirty", 40]
+show("Original array:")
+show(my_arr[0])
+show(my_arr[1])
+show(my_arr[2])
+
+show("Modifying index 1:")
+set my_arr[1] = 99
+show(my_arr[1])
+
+show("String char indexing:")
+set my_str = "hello"
+show(my_str[1])

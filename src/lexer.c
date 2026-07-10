@@ -94,6 +94,8 @@ static TokenType lookupIdent(char* ident) {
     if (strcmp(ident, "show") == 0) return TOKEN_SHOW;
     if (strcmp(ident, "if") == 0) return TOKEN_IF;
     if (strcmp(ident, "while") == 0) return TOKEN_WHILE;
+    if (strcmp(ident, "def") == 0) return TOKEN_DEF;
+    if (strcmp(ident, "return") == 0) return TOKEN_RETURN;
     if (strcmp(ident, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(ident, "string") == 0) return TOKEN_TYPE_STRING;
     // GwareWeb keywords
@@ -127,7 +129,10 @@ Token Lexer_nextToken(Lexer* l) {
         case ')': tok = newToken(TOKEN_RPAREN, ")"); break;
         case '{': tok = newToken(TOKEN_LBRACE, "{"); break;
         case '}': tok = newToken(TOKEN_RBRACE, "}"); break;
+        case '[': tok = newToken(TOKEN_LBRACKET, "["); break;
+        case ']': tok = newToken(TOKEN_RBRACKET, "]"); break;
         case ':': tok = newToken(TOKEN_COLON, ":"); break;
+        case ',': tok = newToken(TOKEN_COMMA, ","); break;
         case '"':
             tok.literal = readString(l);
             tok.type = TOKEN_STRING;
