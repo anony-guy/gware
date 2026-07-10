@@ -220,6 +220,29 @@ static ASTNode* parseReturnStatement(Parser* p) {
     return ret;
 }
 
+static ASTNode* parseTryStatement(Parser* p) {
+    ASTNode* stmt = ASTNode_create(AST_TRY_STATEMENT);
+    nextToken(p); // consume 'try'
+    if (p->curToken.type == TOKEN_LBRACE) {
+        stmt->left = parseBlockStatement(p);
+    }
+    
+    if (p->curToken.type == TOKEN_CATCH) {
+        nextToken(p); // consume 'catch'
+        if (p->curToken.type == TOKEN_LPAREN) nextToken(p);
+        if (p->curToken.type == TOKEN_IDENTIFIER) {
+            stmt->value = strdup(p->curToken.literal);
+            nextToken(p);
+        }
+        if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
+        
+        if (p->curToken.type == TOKEN_LBRACE) {
+            stmt->right = parseBlockStatement(p);
+        }
+    }
+    return stmt;
+}
+
 static ASTNode* parseExpressionStatement(Parser* p) {
     if (p->curToken.type == TOKEN_SHOW) {
         ASTNode* stmt = ASTNode_create(AST_EXPRESSION_STATEMENT);
@@ -348,6 +371,7 @@ static ASTNode* parseStatement(Parser* p) {
     if (p->curToken.type == TOKEN_WHILE) return parseWhileStatement(p);
     if (p->curToken.type == TOKEN_DEF) return parseFunctionDeclaration(p);
     if (p->curToken.type == TOKEN_RETURN) return parseReturnStatement(p);
+    if (p->curToken.type == TOKEN_TRY) return parseTryStatement(p);
     if (p->curToken.type == TOKEN_COMPONENT) return parseComponentDeclaration(p);
     return parseExpressionStatement(p);
 }

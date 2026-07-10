@@ -1,0 +1,8 @@
+show("Fetching example.com...")
+try {
+    set res = fetch("http://example.com")
+    show(res)
+} catch (err) {
+    show("Network error!")
+    show(err)
+}

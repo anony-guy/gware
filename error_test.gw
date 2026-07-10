@@ -1,0 +1,9 @@
+try {
+    show("About to index out of bounds...")
+    set arr = [1, 2]
+    show(arr[5])
+} catch (err) {
+    show("Caught an error!")
+    show(err)
+}
+show("Program continues normally.")

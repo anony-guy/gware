@@ -96,6 +96,8 @@ static TokenType lookupIdent(char* ident) {
     if (strcmp(ident, "while") == 0) return TOKEN_WHILE;
     if (strcmp(ident, "def") == 0) return TOKEN_DEF;
     if (strcmp(ident, "return") == 0) return TOKEN_RETURN;
+    if (strcmp(ident, "try") == 0) return TOKEN_TRY;
+    if (strcmp(ident, "catch") == 0) return TOKEN_CATCH;
     if (strcmp(ident, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(ident, "string") == 0) return TOKEN_TYPE_STRING;
     // GwareWeb keywords

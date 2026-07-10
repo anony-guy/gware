@@ -8,7 +8,7 @@
 #include "updater.h"
 #include "color.h"
 
-#define GWARE_VERSION "v0.0.0.2"
+#define GWARE_VERSION "v0.0.0.3"
 
 void run_script(char* input, int isWeb) {
     Lexer* l = Lexer_create(input);

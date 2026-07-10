@@ -39,6 +39,8 @@ typedef enum {
     TOKEN_TYPE_STRING,
 
     // GwareWeb Keywords
+    TOKEN_TRY,
+    TOKEN_CATCH,
     TOKEN_COMPONENT,
     TOKEN_ACTION,
     TOKEN_STYLE,

@@ -1,8 +1,29 @@
 #include "eval.h"
+#include <setjmp.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+static jmp_buf jmp_stack[64];
+static int jmp_stack_ptr = -1;
+static char last_error_msg[1024];
+
+void throw_error(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(last_error_msg, sizeof(last_error_msg), fmt, args);
+    va_end(args);
+    if (jmp_stack_ptr >= 0) {
+        longjmp(jmp_stack[jmp_stack_ptr], 1);
+    } else {
+        throw_error("%s", last_error_msg);
+    }
+}
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "color.h"
+#include "net.h"
 
 static Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
 static Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
@@ -30,7 +51,7 @@ static Value createNativeFunction(NativeFn fn) {
 
 Value native_read_file(int argCount, Value* args) {
     if (argCount != 1 || args[0].type != VAL_STRING) {
-        printf(ANSI_COLOR_RED "Runtime Error: read_file expects 1 string argument\n" ANSI_COLOR_RESET); exit(1);
+        throw_error("read_file expects 1 string argument");
     }
     FILE* f = fopen(args[0].as.str_val, "r");
     if (!f) return createNull();
@@ -48,13 +69,24 @@ Value native_read_file(int argCount, Value* args) {
 
 Value native_write_file(int argCount, Value* args) {
     if (argCount != 2 || args[0].type != VAL_STRING || args[1].type != VAL_STRING) {
-        printf(ANSI_COLOR_RED "Runtime Error: write_file expects 2 string arguments\n" ANSI_COLOR_RESET); exit(1);
+        throw_error("write_file expects 2 string arguments");
     }
     FILE* f = fopen(args[0].as.str_val, "w");
     if (!f) return createInt(0);
     fputs(args[1].as.str_val, f);
     fclose(f);
     return createInt(1);
+}
+
+Value native_fetch(int argCount, Value* args) {
+    if (argCount != 1 || args[0].type != VAL_STRING) {
+        throw_error("fetch expects 1 string argument (URL)");
+    }
+    char* res = fetch_url(args[0].as.str_val);
+    if (!res) throw_error("Failed to fetch URL: %s", args[0].as.str_val);
+    Value v = createString(res);
+    free(res);
+    return v;
 }
 
 void Value_free(Value v) {
@@ -87,12 +119,10 @@ Value Value_copy(Value v) {
 static void checkTypeMatch(char* annotation, ValueType vtype, char* varName) {
     if (!annotation) return; // Dynamic, anything goes
     if (strcmp(annotation, "int") == 0 && vtype != VAL_INT) {
-        printf(ANSI_COLOR_RED "Runtime Error: Type mismatch! Variable '%s' is declared as 'int' but received another type.\n" ANSI_COLOR_RESET, varName);
-        exit(1);
+        throw_error("Type mismatch! Variable '%s' is declared as 'int' but received another type.", varName);
     }
     if (strcmp(annotation, "string") == 0 && vtype != VAL_STRING) {
-        printf(ANSI_COLOR_RED "Runtime Error: Type mismatch! Variable '%s' is declared as 'string' but received another type.\n" ANSI_COLOR_RESET, varName);
-        exit(1);
+        throw_error("Type mismatch! Variable '%s' is declared as 'string' but received another type.", varName);
     }
 }
 
@@ -109,6 +139,7 @@ Environment* Environment_create(Environment* parent) {
     if (parent == NULL) {
         Environment_set(env, "read_file", createNativeFunction(native_read_file), NULL);
         Environment_set(env, "write_file", createNativeFunction(native_write_file), NULL);
+        Environment_set(env, "fetch", createNativeFunction(native_fetch), NULL);
     }
     return env;
 }
@@ -206,20 +237,20 @@ Value Eval_node(ASTNode* node, Environment* env) {
         case AST_SET_STATEMENT: {
             if (node->left->type == AST_INDEX_EXPRESSION) {
                 if (node->left->left->type != AST_IDENTIFIER) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Complex array assignments not supported yet\n" ANSI_COLOR_RESET); exit(1);
+                    throw_error("Complex array assignments not supported yet");
                 }
                 char* varName = node->left->left->value;
                 Value* ref = Environment_get_ref(env, varName);
                 if (!ref || ref->type != VAL_ARRAY) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Cannot index non-array variable '%s'\n" ANSI_COLOR_RESET, varName); exit(1);
+                    throw_error("Cannot index non-array variable '%s'", varName);
                 }
                 Value idxVal = Eval_node(node->left->right, env);
                 if (idxVal.type != VAL_INT) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Array index must be an integer\n" ANSI_COLOR_RESET); exit(1);
+                    throw_error("Array index must be an integer");
                 }
                 int idx = idxVal.as.int_val;
                 if (idx < 0 || idx >= ref->as.arr_val->count) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Array assignment out of bounds\n" ANSI_COLOR_RESET); exit(1);
+                    throw_error("Array assignment out of bounds");
                 }
                 Value newVal = Eval_node(node->right, env);
                 Value_free(ref->as.arr_val->elements[idx]);
@@ -245,18 +276,38 @@ Value Eval_node(ASTNode* node, Environment* env) {
             int found = 0;
             Value val = Environment_get(env, node->value, &found);
             if (!found) {
-                printf(ANSI_COLOR_RED "Runtime Error: Undefined variable '%s'\n" ANSI_COLOR_RESET, node->value);
-                exit(1);
+                throw_error("Undefined variable '%s'", node->value);
             }
             return val;
         }
         
         case AST_IF_STATEMENT: {
-            Value cond = Eval_node(node->left, env);
-            if (isTruthy(cond)) {
+            Value condition = Eval_node(node->left, env);
+            if (isTruthy(condition)) {
                 return Eval_node(node->right, env);
             }
             return createNull();
+        }
+        
+        case AST_TRY_STATEMENT: {
+            jmp_stack_ptr++;
+            if (setjmp(jmp_stack[jmp_stack_ptr]) == 0) {
+                Value res = Eval_node(node->left, env);
+                jmp_stack_ptr--;
+                return res;
+            } else {
+                jmp_stack_ptr--;
+                if (node->right) {
+                    Environment* catchEnv = Environment_create(env);
+                    if (node->value) {
+                        Environment_set(catchEnv, node->value, createString(last_error_msg), NULL);
+                    }
+                    Value res = Eval_node(node->right, catchEnv);
+                    Environment_destroy(catchEnv);
+                    return res;
+                }
+                return createNull();
+            }
         }
         
         case AST_WHILE_STATEMENT: {
@@ -293,22 +344,22 @@ Value Eval_node(ASTNode* node, Environment* env) {
         case AST_INDEX_EXPRESSION: {
             Value arrVal = Eval_node(node->left, env);
             if (arrVal.type != VAL_ARRAY && arrVal.type != VAL_STRING) {
-                printf(ANSI_COLOR_RED "Runtime Error: Cannot index a non-array/string\n" ANSI_COLOR_RESET); exit(1);
+                throw_error("Cannot index a non-array/string");
             }
             Value idxVal = Eval_node(node->right, env);
             if (idxVal.type != VAL_INT) {
-                printf(ANSI_COLOR_RED "Runtime Error: Index must be an integer\n" ANSI_COLOR_RESET); exit(1);
+                throw_error("Index must be an integer");
             }
             int idx = idxVal.as.int_val;
             
             if (arrVal.type == VAL_ARRAY) {
                 if (idx < 0 || idx >= arrVal.as.arr_val->count) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Array index %d out of bounds (count: %d)\n" ANSI_COLOR_RESET, idx, arrVal.as.arr_val->count); exit(1);
+                    throw_error("Array index %d out of bounds (count: %d)", idx, arrVal.as.arr_val->count);
                 }
                 return Value_copy(arrVal.as.arr_val->elements[idx]);
             } else {
                 if (idx < 0 || idx >= strlen(arrVal.as.str_val)) {
-                    printf(ANSI_COLOR_RED "Runtime Error: String index %d out of bounds\n" ANSI_COLOR_RESET, idx); exit(1);
+                    throw_error("String index %d out of bounds", idx);
                 }
                 char buf[2] = { arrVal.as.str_val[idx], '\0' };
                 return createString(buf);
@@ -325,13 +376,11 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 } else if (leftVal.type == VAL_STRING && rightVal.type == VAL_STRING) {
                     return createInt(strcmp(leftVal.as.str_val, rightVal.as.str_val) == 0);
                 }
-                printf(ANSI_COLOR_RED "Runtime Error: Cannot compare differing types with ==\n" ANSI_COLOR_RESET);
-                exit(1);
+                throw_error("Cannot compare differing types with ==");
             }
             
             if (leftVal.type != VAL_INT || rightVal.type != VAL_INT) {
-                printf(ANSI_COLOR_RED "Runtime Error: Math operations (+, -, *, /, <, >) require 'int' types.\n" ANSI_COLOR_RESET);
-                exit(1);
+                throw_error("Math operations (+, -, *, /, <, >) require 'int' types.");
             }
             
             if (strcmp(node->value, "+") == 0) return createInt(leftVal.as.int_val + rightVal.as.int_val);
@@ -339,8 +388,7 @@ Value Eval_node(ASTNode* node, Environment* env) {
             if (strcmp(node->value, "*") == 0) return createInt(leftVal.as.int_val * rightVal.as.int_val);
             if (strcmp(node->value, "/") == 0) {
                 if (rightVal.as.int_val == 0) {
-                    printf(ANSI_COLOR_RED "Runtime Error: Division by zero.\n" ANSI_COLOR_RESET);
-                    exit(1);
+                    throw_error("Division by zero.");
                 }
                 return createInt(leftVal.as.int_val / rightVal.as.int_val);
             }
@@ -358,16 +406,14 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 else if (val.type == VAL_ARRAY) printf("[Array count=%d]\n", val.as.arr_val->count);
                 return val;
             }
-            printf(ANSI_COLOR_RED "Runtime Error: unknown function '%s'\n" ANSI_COLOR_RESET, node->left->value);
-            exit(1);
+            throw_error("unknown function '%s'", node->left->value);
         }
         
         case AST_FUNCTION_CALL: {
             int found = 0;
             Value funcVal = Environment_get(env, node->value, &found);
             if (!found || (funcVal.type != VAL_FUNCTION && funcVal.type != VAL_NATIVE_FUNCTION)) {
-                printf(ANSI_COLOR_RED "Runtime Error: Undefined function '%s'\n" ANSI_COLOR_RESET, node->value);
-                exit(1);
+                throw_error("Undefined function '%s'", node->value);
             }
             
             if (funcVal.type == VAL_NATIVE_FUNCTION) {
@@ -385,8 +431,7 @@ Value Eval_node(ASTNode* node, Environment* env) {
             
             ASTNode* funcNode = funcVal.as.func_val;
             if (node->parameterCount != funcNode->parameterCount) {
-                printf(ANSI_COLOR_RED "Runtime Error: Function '%s' expects %d arguments, but got %d\n" ANSI_COLOR_RESET, node->value, funcNode->parameterCount, node->parameterCount);
-                exit(1);
+                throw_error("Function '%s' expects %d arguments, but got %d", node->value, funcNode->parameterCount, node->parameterCount);
             }
             
             Environment* funcEnv = Environment_create(env);
