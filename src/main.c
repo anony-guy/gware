@@ -7,7 +7,7 @@
 #include "transpiler.h"
 #include "updater.h"
 
-#define GWARE_VERSION "v0.0.0.1"
+#define GWARE_VERSION "v0.0.0.2"
 
 void run_script(char* input, int isWeb) {
     Lexer* l = Lexer_create(input);
