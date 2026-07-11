@@ -15,6 +15,13 @@ typedef enum {
 struct ValueArray;
 struct ValueObject;
 struct Value;
+struct Environment;
+
+typedef struct GCObject {
+    ValueType type;
+    int marked;
+    struct GCObject* next;
+} GCObject;
 
 typedef struct Value (*NativeFn)(int argCount, struct Value* args);
 
@@ -33,14 +40,16 @@ typedef struct Value {
 } Value;
 
 typedef struct ValueArray {
-    Value* elements;
+    GCObject gc;
+    struct Value* elements;
     int count;
     int capacity;
 } ValueArray;
 
 typedef struct ValueObject {
+    GCObject gc;
     char** keys;
-    Value* values;
+    struct Value* values;
     int count;
     int capacity;
 } ValueObject;
@@ -48,10 +57,11 @@ typedef struct ValueObject {
 typedef struct Environment {
     char** names;
     char** types;
-    Value* values;
+    struct Value* values;
     int count;
     int capacity;
     struct Environment* parent;
+    struct Environment* next_active;
 } Environment;
 
 void Value_free(Value v);
@@ -70,6 +80,7 @@ void Environment_set(Environment* env, char* name, Value value, char* typeAnnota
 Value Environment_get(Environment* env, char* name, int* found);
 Value* Environment_get_ref(Environment* env, char* name);
 void Environment_destroy(Environment* env);
+void gc_collect(void);
 
 Value Eval_node(struct ASTNode* node, Environment* env);
 Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv);

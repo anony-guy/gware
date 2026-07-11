@@ -1,0 +1,10 @@
+set routes = {
+    "WS /chat": def(req) {
+        set body = req["body"]
+        set sock = req["socket_id"]
+        ws_send(sock, "Echo!")
+        return "Optional Response"
+    }
+}
+
+http_serve(8081, routes)

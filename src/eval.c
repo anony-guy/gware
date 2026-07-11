@@ -30,18 +30,37 @@ void throw_error(const char* fmt, ...) {
 #include "lexer.h"
 #include "parser.h"
 
+GCObject* global_gc_list = NULL;
+Environment* global_active_envs = NULL;
+
 int has_error = 0;
 Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
 Value createInt(int i) { Value v; v.type = VAL_INT; v.is_return = 0; v.as.int_val = i; return v; }
-Value createString(char* s) { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = strdup(s); return v; }
+Value createString(char* s) { 
+    Value v; v.type = VAL_STRING; v.is_return = 0; 
+    if (!s) { v.as.str_val = NULL; return v; }
+    GCObject* obj = (GCObject*)malloc(sizeof(GCObject) + strlen(s) + 1);
+    obj->type = VAL_STRING;
+    obj->marked = 0;
+    obj->next = global_gc_list;
+    global_gc_list = obj;
+    char* str = (char*)(obj + 1);
+    strcpy(str, s);
+    v.as.str_val = str;
+    return v; 
+}
 Value createFunction(ASTNode* func) { Value v; v.type = VAL_FUNCTION; v.is_return = 0; v.as.func_val = func; return v; }
-
 
 Value createObject(int capacity) {
     Value v; 
     v.type = VAL_OBJECT; 
     v.is_return = 0; 
-    v.as.obj_val = (ValueObject*)malloc(sizeof(ValueObject));
+    ValueObject* obj_val = (ValueObject*)malloc(sizeof(ValueObject));
+    obj_val->gc.type = VAL_OBJECT;
+    obj_val->gc.marked = 0;
+    obj_val->gc.next = global_gc_list;
+    global_gc_list = (GCObject*)obj_val;
+    v.as.obj_val = obj_val;
     v.as.obj_val->count = 0;
     v.as.obj_val->capacity = capacity > 0 ? capacity : 4;
     v.as.obj_val->keys = (char**)malloc(sizeof(char*) * v.as.obj_val->capacity);
@@ -53,7 +72,12 @@ Value createArray(int capacity) {
     Value v; 
     v.type = VAL_ARRAY; 
     v.is_return = 0; 
-    v.as.arr_val = (ValueArray*)malloc(sizeof(ValueArray));
+    ValueArray* arr_val = (ValueArray*)malloc(sizeof(ValueArray));
+    arr_val->gc.type = VAL_ARRAY;
+    arr_val->gc.marked = 0;
+    arr_val->gc.next = global_gc_list;
+    global_gc_list = (GCObject*)arr_val;
+    v.as.arr_val = arr_val;
     v.as.arr_val->count = 0;
     v.as.arr_val->capacity = capacity > 0 ? capacity : 4;
     v.as.arr_val->elements = (Value*)malloc(sizeof(Value) * v.as.arr_val->capacity);
@@ -175,52 +199,11 @@ Value native_string_replace(int argCount, Value* args) {
 
 
 void Value_free(Value v) {
-    if (v.type == VAL_STRING && v.as.str_val) free(v.as.str_val);
-    
-    if (v.type == VAL_OBJECT && v.as.obj_val) {
-        for (int i = 0; i < v.as.obj_val->count; i++) {
-            free(v.as.obj_val->keys[i]);
-            Value_free(v.as.obj_val->values[i]);
-        }
-        free(v.as.obj_val->keys);
-        free(v.as.obj_val->values);
-        free(v.as.obj_val);
-    }
-    if (v.type == VAL_ARRAY && v.as.arr_val) {
-        for (int i = 0; i < v.as.arr_val->count; i++) {
-            Value_free(v.as.arr_val->elements[i]);
-        }
-        free(v.as.arr_val->elements);
-        free(v.as.arr_val);
-    }
+    // Handled by GC
 }
 
 Value Value_copy(Value v) {
-    Value copy = v;
-    if (v.type == VAL_STRING && v.as.str_val) {
-        copy.as.str_val = strdup(v.as.str_val);
-    } else 
-    if (v.type == VAL_OBJECT && v.as.obj_val) {
-        copy.as.obj_val = (ValueObject*)malloc(sizeof(ValueObject));
-        copy.as.obj_val->count = v.as.obj_val->count;
-        copy.as.obj_val->capacity = v.as.obj_val->capacity;
-        copy.as.obj_val->keys = (char**)malloc(sizeof(char*) * copy.as.obj_val->capacity);
-        copy.as.obj_val->values = (Value*)malloc(sizeof(Value) * copy.as.obj_val->capacity);
-        for (int i = 0; i < copy.as.obj_val->count; i++) {
-            copy.as.obj_val->keys[i] = strdup(v.as.obj_val->keys[i]);
-            copy.as.obj_val->values[i] = Value_copy(v.as.obj_val->values[i]);
-        }
-    }
-    if (v.type == VAL_ARRAY && v.as.arr_val) {
-        copy.as.arr_val = (ValueArray*)malloc(sizeof(ValueArray));
-        copy.as.arr_val->count = v.as.arr_val->count;
-        copy.as.arr_val->capacity = v.as.arr_val->capacity;
-        copy.as.arr_val->elements = (Value*)malloc(sizeof(Value) * copy.as.arr_val->capacity);
-        for (int i = 0; i < copy.as.arr_val->count; i++) {
-            copy.as.arr_val->elements[i] = Value_copy(v.as.arr_val->elements[i]);
-        }
-    }
-    return copy;
+    return v; // Shallow copy
 }
 
 static void checkTypeMatch(char* annotation, ValueType vtype, char* varName) {
@@ -247,6 +230,9 @@ Environment* Environment_create(Environment* parent) {
     env->count = 0;
     env->capacity = 0;
     env->parent = parent;
+    
+    env->next_active = global_active_envs;
+    global_active_envs = env;
     
     // Register native functions in the global environment
     if (parent == NULL) {
@@ -325,15 +311,72 @@ Value* Environment_get_ref(Environment* env, char* name) {
 
 void Environment_destroy(Environment* env) {
     if (!env) return;
+    if (global_active_envs == env) {
+        global_active_envs = env->next_active;
+    } else {
+        Environment* curr = global_active_envs;
+        while (curr && curr->next_active != env) curr = curr->next_active;
+        if (curr) curr->next_active = env->next_active;
+    }
     for (int i = 0; i < env->count; i++) {
         free(env->names[i]);
         if (env->types[i]) free(env->types[i]);
-        Value_free(env->values[i]);
     }
     if (env->names) free(env->names);
     if (env->types) free(env->types);
     if (env->values) free(env->values);
     free(env);
+}
+
+void mark_value(Value v) {
+    if (v.type == VAL_STRING && v.as.str_val) {
+        GCObject* obj = (GCObject*)v.as.str_val - 1;
+        if (!obj->marked) obj->marked = 1;
+    } else if (v.type == VAL_ARRAY && v.as.arr_val) {
+        GCObject* obj = (GCObject*)v.as.arr_val;
+        if (!obj->marked) {
+            obj->marked = 1;
+            for (int i=0; i<v.as.arr_val->count; i++) mark_value(v.as.arr_val->elements[i]);
+        }
+    } else if (v.type == VAL_OBJECT && v.as.obj_val) {
+        GCObject* obj = (GCObject*)v.as.obj_val;
+        if (!obj->marked) {
+            obj->marked = 1;
+            for (int i=0; i<v.as.obj_val->count; i++) mark_value(v.as.obj_val->values[i]);
+        }
+    }
+}
+
+void gc_collect(void) {
+    Environment* env = global_active_envs;
+    while (env) {
+        for (int i = 0; i < env->count; i++) {
+            mark_value(env->values[i]);
+        }
+        env = env->next_active;
+    }
+    
+    GCObject** curr = &global_gc_list;
+    while (*curr) {
+        if (!(*curr)->marked) {
+            GCObject* unreached = *curr;
+            *curr = unreached->next;
+            
+            if (unreached->type == VAL_ARRAY) {
+                ValueArray* arr = (ValueArray*)unreached;
+                if (arr->elements) free(arr->elements);
+            } else if (unreached->type == VAL_OBJECT) {
+                ValueObject* obj = (ValueObject*)unreached;
+                for (int i=0; i<obj->count; i++) free(obj->keys[i]);
+                if (obj->keys) free(obj->keys);
+                if (obj->values) free(obj->values);
+            }
+            free(unreached);
+        } else {
+            (*curr)->marked = 0;
+            curr = &(*curr)->next;
+        }
+    }
 }
 
 static int isTruthy(Value v) {
