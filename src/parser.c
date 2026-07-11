@@ -21,9 +21,11 @@ static int getPrecedence(TokenType type) {
         case TOKEN_GREATER: return PREC_LESSGREATER;
         case TOKEN_PLUS: return PREC_SUM;
         case TOKEN_MINUS: return PREC_SUM;
-        case TOKEN_STAR: return PREC_PRODUCT;
+        case TOKEN_STAR:
         case TOKEN_SLASH: return PREC_PRODUCT;
-        case TOKEN_LBRACKET: return PREC_INDEX;
+        case TOKEN_LBRACKET: return PREC_CALL;
+        case TOKEN_LPAREN: return PREC_CALL;
+        case TOKEN_DOT: return PREC_CALL;
         default: return PREC_LOWEST;
     }
 }
@@ -91,6 +93,63 @@ static ASTNode* parsePrimary(Parser* p) {
             if (p->curToken.type == TOKEN_COMMA) nextToken(p);
         }
         if (p->curToken.type == TOKEN_RBRACKET) nextToken(p);
+    } else if (p->curToken.type == TOKEN_LBRACE) {
+        node = ASTNode_create(AST_OBJECT_LITERAL);
+        nextToken(p); // consume {
+        while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
+            ASTNode* key = NULL;
+            if (p->curToken.type == TOKEN_STRING) {
+                key = ASTNode_create(AST_STRING_LITERAL);
+                key->value = strdup(p->curToken.literal);
+            } else if (p->curToken.type == TOKEN_IDENTIFIER) {
+                key = ASTNode_create(AST_STRING_LITERAL);
+                key->value = strdup(p->curToken.literal);
+            } else {
+                printf(ANSI_COLOR_RED "Parse error: expected string or identifier for object key, got '%s'\n" ANSI_COLOR_RESET, p->curToken.literal);
+                nextToken(p);
+                continue;
+            }
+            nextToken(p); // consume key
+            if (p->curToken.type != TOKEN_COLON) {
+                printf(ANSI_COLOR_RED "Parse error: expected ':' after object key, got '%s'\n" ANSI_COLOR_RESET, p->curToken.literal);
+            } else {
+                nextToken(p); // consume :
+            }
+            ASTNode* val = parseExpression(p, PREC_LOWEST);
+            if (key && val) {
+                ASTNode_addStatement(node, key);
+                ASTNode_addStatement(node, val);
+            }
+            if (p->curToken.type == TOKEN_COMMA) nextToken(p);
+        }
+        if (p->curToken.type == TOKEN_RBRACE) nextToken(p);
+    } else if (p->curToken.type == TOKEN_DEF) {
+        node = ASTNode_create(AST_FUNCTION_DECLARATION);
+        nextToken(p); // consume 'def'
+        if (p->curToken.type == TOKEN_IDENTIFIER) {
+            node->value = strdup(p->curToken.literal);
+            nextToken(p);
+        } else {
+            node->value = strdup("anonymous");
+        }
+        if (p->curToken.type == TOKEN_LPAREN) {
+            nextToken(p);
+            while (p->curToken.type != TOKEN_RPAREN && p->curToken.type != TOKEN_EOF) {
+                ASTNode* param = ASTNode_create(AST_IDENTIFIER);
+                if (p->curToken.type == TOKEN_TYPE_INT || p->curToken.type == TOKEN_TYPE_STRING) {
+                    param->typeAnnotation = strdup(p->curToken.literal);
+                    nextToken(p);
+                }
+                param->value = strdup(p->curToken.literal);
+                nextToken(p);
+                ASTNode_addParameter(node, param);
+                if (p->curToken.type == TOKEN_COMMA) nextToken(p);
+            }
+            if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
+        }
+        if (p->curToken.type == TOKEN_LBRACE) {
+            node->right = parseBlockStatement(p);
+        }
     } else {
         printf(ANSI_COLOR_RED "Parse error: expected identifier, number, or string, got type %d ('%s')\n" ANSI_COLOR_RESET, p->curToken.type, p->curToken.literal);
         nextToken(p);
@@ -125,6 +184,33 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
             expr->left = left;
             expr->right = parseExpression(p, PREC_LOWEST);
             if (p->curToken.type == TOKEN_RBRACKET) nextToken(p);
+            left = expr;
+            continue;
+        }
+        
+        if (opToken.type == TOKEN_LPAREN) {
+            nextToken(p); // consume (
+            ASTNode* expr = ASTNode_create(AST_CALL_EXPRESSION);
+            expr->left = left;
+            if (p->curToken.type != TOKEN_RPAREN) {
+                expr->right = parseExpression(p, PREC_LOWEST);
+            }
+            if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
+            left = expr;
+            continue;
+        }
+        
+        if (opToken.type == TOKEN_DOT) {
+            nextToken(p); // consume .
+            ASTNode* expr = ASTNode_create(AST_INDEX_EXPRESSION);
+            expr->left = left;
+            if (p->curToken.type != TOKEN_IDENTIFIER) {
+                printf(ANSI_COLOR_RED "Parse error: expected identifier after '.'\n" ANSI_COLOR_RESET);
+            } else {
+                expr->right = ASTNode_create(AST_STRING_LITERAL);
+                expr->right->value = strdup(p->curToken.literal);
+                nextToken(p); // consume identifier
+            }
             left = expr;
             continue;
         }
@@ -340,6 +426,14 @@ static ASTNode* parseUIElement(Parser* p) {
             if (p->curToken.type == TOKEN_COLON || p->curToken.type == TOKEN_ASSIGN) nextToken(p);
             attr->value = strdup(p->curToken.literal); // attr value
             nextToken(p); // consume attr value
+            while (p->curToken.type == TOKEN_DOT) {
+                nextToken(p);
+                char* temp = malloc(strlen(attr->value) + strlen(p->curToken.literal) + 5);
+                sprintf(temp, "%s[\"%s\"]", attr->value, p->curToken.literal);
+                free(attr->value);
+                attr->value = temp;
+                nextToken(p);
+            }
             ASTNode_addAttribute(el, attr);
             // Ignore commas if present
             if (p->curToken.literal && strcmp(p->curToken.literal, ",") == 0) nextToken(p);
@@ -434,6 +528,41 @@ static ASTNode* parseComponentDeclaration(Parser* p) {
     return comp;
 }
 
+static ASTNode* parseStoreDeclaration(Parser* p) {
+    ASTNode* store = ASTNode_create(AST_STORE_DECLARATION);
+    nextToken(p); // consume 'store'
+    store->value = strdup(p->curToken.literal);
+    nextToken(p); // consume name
+    store->right = parseExpression(p, PREC_LOWEST);
+    return store;
+}
+
+static ASTNode* parseRouterDeclaration(Parser* p) {
+    ASTNode* router = ASTNode_create(AST_ROUTER_DECLARATION);
+    nextToken(p); // consume 'router'
+    if (p->curToken.type == TOKEN_LBRACE) {
+        nextToken(p); // consume '{'
+        while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
+            if (p->curToken.type == TOKEN_ROUTE) {
+                ASTNode* route = ASTNode_create(AST_ROUTE_DECLARATION);
+                nextToken(p); // consume 'route'
+                if (p->curToken.type == TOKEN_LPAREN) nextToken(p);
+                route->propertyName = strdup(p->curToken.literal); // path (e.g. "/")
+                nextToken(p); // consume path
+                if (p->curToken.type == TOKEN_COMMA) nextToken(p);
+                route->value = strdup(p->curToken.literal); // component name
+                nextToken(p); // consume component name
+                if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
+                ASTNode_addStatement(router, route);
+            } else {
+                nextToken(p);
+            }
+        }
+        if (p->curToken.type == TOKEN_RBRACE) nextToken(p);
+    }
+    return router;
+}
+
 static ASTNode* parseStatement(Parser* p) {
     if (p->curToken.type == TOKEN_SET) return parseSetStatement(p);
     if (p->curToken.type == TOKEN_IF) return parseIfStatement(p);
@@ -443,6 +572,8 @@ static ASTNode* parseStatement(Parser* p) {
     if (p->curToken.type == TOKEN_TRY) return parseTryStatement(p);
     if (p->curToken.type == TOKEN_IMPORT) return parseImportStatement(p);
     if (p->curToken.type == TOKEN_COMPONENT) return parseComponentDeclaration(p);
+    if (p->curToken.type == TOKEN_STORE) return parseStoreDeclaration(p);
+    if (p->curToken.type == TOKEN_ROUTER) return parseRouterDeclaration(p);
     return parseExpressionStatement(p);
 }
 

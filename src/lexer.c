@@ -120,6 +120,9 @@ static TokenType lookupIdent(char* ident) {
     if (strcmp(ident, "action") == 0) return TOKEN_ACTION;
     if (strcmp(ident, "style") == 0) return TOKEN_STYLE;
     if (strcmp(ident, "view") == 0) return TOKEN_VIEW;
+    if (strcmp(ident, "store") == 0) return TOKEN_STORE;
+    if (strcmp(ident, "router") == 0) return TOKEN_ROUTER;
+    if (strcmp(ident, "route") == 0) return TOKEN_ROUTE;
     return TOKEN_IDENTIFIER;
 }
 
@@ -142,6 +145,7 @@ Token Lexer_nextToken(Lexer* l) {
         case '/': tok = newToken(TOKEN_SLASH, "/"); break;
         case '<': tok = newToken(TOKEN_LESS, "<"); break;
         case '>': tok = newToken(TOKEN_GREATER, ">"); break;
+        case '.': tok = newToken(TOKEN_DOT, "."); break;
         case '(': tok = newToken(TOKEN_LPAREN, "("); break;
         case ')': tok = newToken(TOKEN_RPAREN, ")"); break;
         case '{': tok = newToken(TOKEN_LBRACE, "{"); break;

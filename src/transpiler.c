@@ -14,6 +14,7 @@ typedef struct {
 
 static ComponentInstance instances[100];
 static int instanceCount = 0;
+static ASTNode* globalProgram = NULL;
 
 static void addInstance(char* compName, char* instanceId, ASTNode* compNode, ASTNode* instanceEl) {
     instances[instanceCount].compName = strdup(compName);
@@ -53,7 +54,21 @@ static void emitCSS(ASTNode* styleBlock, char* compName, FILE* out) {
 
 static void emitJSExpr(ASTNode* expr, char* instanceId, FILE* out) {
     if (!expr) return;
-    if (expr->type == AST_IDENTIFIER) fprintf(out, "%s_%s", instanceId, expr->value);
+    if (expr->type == AST_IDENTIFIER) {
+        int isStore = 0;
+        if (globalProgram) {
+            for (int i = 0; i < globalProgram->statementCount; i++) {
+                if (globalProgram->statements[i]->type == AST_STORE_DECLARATION) {
+                    if (strcmp(globalProgram->statements[i]->value, expr->value) == 0) {
+                        isStore = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (isStore) fprintf(out, "%s", expr->value);
+        else fprintf(out, "%s_%s", instanceId, expr->value);
+    }
     else if (expr->type == AST_INTEGER_LITERAL) fprintf(out, "%s", expr->value);
     else if (expr->type == AST_STRING_LITERAL) fprintf(out, "\"%s\"", expr->value);
     else if (expr->type == AST_INFIX_EXPRESSION) {
@@ -67,6 +82,29 @@ static void emitJSExpr(ASTNode* expr, char* instanceId, FILE* out) {
             if (i < expr->statementCount - 1) fprintf(out, ", ");
         }
         fprintf(out, "]");
+    } else if (expr->type == AST_INDEX_EXPRESSION) {
+        emitJSExpr(expr->left, instanceId, out);
+        fprintf(out, "[");
+        emitJSExpr(expr->right, instanceId, out);
+        fprintf(out, "]");
+    } else if (expr->type == AST_FUNCTION_CALL) {
+        if (strcmp(expr->value, "js") == 0) {
+            if (expr->parameterCount > 0 && expr->parameters[0]->type == AST_STRING_LITERAL) {
+                fprintf(out, "%s", expr->parameters[0]->value);
+            }
+            return;
+        } else if (strcmp(expr->value, "fetch") == 0) {
+            fprintf(out, "(await fetch(");
+            if (expr->parameterCount > 0) emitJSExpr(expr->parameters[0], instanceId, out);
+            fprintf(out, ").then(r => r.json()))");
+            return;
+        }
+        fprintf(out, "%s(", expr->value);
+        for (int i = 0; i < expr->parameterCount; i++) {
+            emitJSExpr(expr->parameters[i], instanceId, out);
+            if (i < expr->parameterCount - 1) fprintf(out, ", ");
+        }
+        fprintf(out, ")");
     }
 }
 
@@ -94,23 +132,25 @@ static void emitJSState(ASTNode* setStmt, ComponentInstance* inst, FILE* out) {
         if (isNum) fprintf(out, "%s", propValue);
         else fprintf(out, "\"%s\"", propValue);
     } else {
-        ASTNode* right = setStmt->right;
-        if (right->type == AST_INTEGER_LITERAL) fprintf(out, "%s", right->value);
-        else if (right->type == AST_STRING_LITERAL) fprintf(out, "\"%s\"", right->value);
-        else if (right->type == AST_ARRAY_LITERAL) emitJSExpr(right, inst->instanceId, out);
-        else fprintf(out, "0"); 
+        emitJSExpr(setStmt->right, inst->instanceId, out);
     }
     fprintf(out, ";\n");
 }
 
 static void emitJSAction(ASTNode* actionBlock, char* instanceId, FILE* out) {
-    fprintf(out, "function %s_%s() {\n", instanceId, actionBlock->value);
+    fprintf(out, "async function %s_%s() {\n", instanceId, actionBlock->value);
     ASTNode* block = actionBlock->right;
     for (int i = 0; i < block->statementCount; i++) {
         ASTNode* stmt = block->statements[i];
         if (stmt->type == AST_SET_STATEMENT) {
-            fprintf(out, "    %s_%s = ", instanceId, stmt->left->value);
+            fprintf(out, "    ");
+            emitJSExpr(stmt->left, instanceId, out);
+            fprintf(out, " = ");
             emitJSExpr(stmt->right, instanceId, out);
+            fprintf(out, ";\n");
+        } else if (stmt->type == AST_EXPRESSION_STATEMENT) {
+            fprintf(out, "    ");
+            emitJSExpr(stmt->left, instanceId, out);
             fprintf(out, ";\n");
         }
     }
@@ -133,6 +173,10 @@ static void emitJSTemplate(ASTNode* block, char* instanceId, char* loopVar, FILE
                     fprintf(out, "${%s} ", loopVar);
                 } else {
                     fprintf(out, "${%s_%s} ", instanceId, arg->value);
+                }
+            } else if (arg->type == AST_INDEX_EXPRESSION) {
+                if (arg->left->type == AST_IDENTIFIER && arg->right->type == AST_STRING_LITERAL) {
+                    fprintf(out, "${%s[\"%s\"]} ", arg->left->value, arg->right->value);
                 }
             }
         } else if (el->type == AST_UI_ELEMENT) {
@@ -162,11 +206,11 @@ static void emitUpdateLoops(ASTNode* block, char* instanceId, FILE* out) {
                 fprintf(out, "            if (");
                 emitJSExpr(el->left, instanceId, out);
                 fprintf(out, ") {\n");
-                fprintf(out, "                container.innerHTML = `");
+                fprintf(out, "                updateDOMHtml(container, `");
                 emitJSTemplate(el->right, instanceId, NULL, out);
-                fprintf(out, "`;\n");
+                fprintf(out, "`);\n");
                 fprintf(out, "            } else {\n");
-                fprintf(out, "                container.innerHTML = '';\n");
+                fprintf(out, "                updateDOMHtml(container, '');\n");
                 fprintf(out, "            }\n");
                 fprintf(out, "        }\n");
                 fprintf(out, "    }\n");
@@ -183,15 +227,31 @@ static void emitUpdateLoops(ASTNode* block, char* instanceId, FILE* out) {
                 if (inAttr && asAttr && loopId) {
                     fprintf(out, "    {\n");
                     fprintf(out, "        let html = ``;\n");
-                    fprintf(out, "        if (%s_%s) {\n", instanceId, inAttr);
-                    fprintf(out, "            for (let %s of %s_%s) {\n", asAttr, instanceId, inAttr);
+                    int isStore = 0;
+                    if (globalProgram) {
+                        for (int s = 0; s < globalProgram->statementCount; s++) {
+                            if (globalProgram->statements[s]->type == AST_STORE_DECLARATION) {
+                                if (strncmp(inAttr, globalProgram->statements[s]->value, strlen(globalProgram->statements[s]->value)) == 0) {
+                                    isStore = 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (isStore) {
+                        fprintf(out, "        if (%s) {\n", inAttr);
+                        fprintf(out, "            for (let %s of %s) {\n", asAttr, inAttr);
+                    } else {
+                        fprintf(out, "        if (%s_%s) {\n", instanceId, inAttr);
+                        fprintf(out, "            for (let %s of %s_%s) {\n", asAttr, instanceId, inAttr);
+                    }
                     fprintf(out, "                html += `");
                     emitJSTemplate(el->right, instanceId, asAttr, out);
                     fprintf(out, "`;\n");
                     fprintf(out, "            }\n");
                     fprintf(out, "        }\n");
                     fprintf(out, "        let container = document.getElementById('%s');\n", loopId);
-                    fprintf(out, "        if (container) container.innerHTML = html;\n");
+                    fprintf(out, "        if (container) updateDOMHtml(container, html);\n");
                     fprintf(out, "    }\n");
                 }
             } else if (el->right && el->right->type == AST_BLOCK_STATEMENT) {
@@ -210,6 +270,10 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, char* instanceId, A
                 fprintf(out, "%s ", arg->value);
             } else if (arg->type == AST_IDENTIFIER) {
                 fprintf(out, "<span id=\"var_%s_%s\"></span> ", instanceId, arg->value);
+            } else if (arg->type == AST_INDEX_EXPRESSION) {
+                if (arg->left->type == AST_IDENTIFIER && arg->right->type == AST_STRING_LITERAL) {
+                    fprintf(out, "<span class=\"bind_store_%s_%s\"></span> ", arg->left->value, arg->right->value);
+                }
             }
         } else if (el->type == AST_IF_STATEMENT) {
             if (!el->typeAnnotation) {
@@ -247,7 +311,7 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, char* instanceId, A
                 fprintf(out, "<%s class=\"%s\"", el->value, compName);
                 for (int a = 0; a < el->attributeCount; a++) {
                     ASTNode* attr = el->attributes[a];
-                    if (strcmp(attr->propertyName, "onClick") == 0) {
+                    if (strcmp(attr->propertyName, "onClick") == 0 || strcmp(attr->propertyName, "onclick") == 0) {
                         fprintf(out, " onclick=\"%s_%s()\"", instanceId, attr->value);
                     } else if (strcmp(attr->propertyName, "bind") == 0) {
                         fprintf(out, " id=\"var_%s_%s_input\" oninput=\"%s_%s = this.value; updateDOM()\"", instanceId, attr->value, instanceId, attr->value);
@@ -265,8 +329,10 @@ static void emitHTMLView(ASTNode* viewBlock, char* compName, char* instanceId, A
     }
 }
 
-void Transpile_to_html(ASTNode* program, const char* outputFile) {
-    instanceCount = 0;
+void Transpiler_transpileToWeb(ASTNode* program, char* outputFile) {
+    if (!program) return;
+    globalProgram = program;
+    
     FILE* out = fopen(outputFile, "w");
     if (!out) {
         printf(ANSI_COLOR_RED "Error: Could not open output file %s\n" ANSI_COLOR_RESET, outputFile);
@@ -314,6 +380,32 @@ void Transpile_to_html(ASTNode* program, const char* outputFile) {
     
     fprintf(out, "</div>\n<script>\n");
     
+    // 2.5 Pass: Emit Stores
+    for (int i = 0; i < program->statementCount; i++) {
+        if (program->statements[i]->type == AST_STORE_DECLARATION) {
+            ASTNode* store = program->statements[i];
+            char* storeName = store->value;
+            fprintf(out, "const _%s_data = {};\n", storeName);
+            ASTNode* obj = store->right;
+            if (obj && obj->type == AST_OBJECT_LITERAL) {
+                for (int j = 0; j < obj->statementCount; j += 2) {
+                    char* key = obj->statements[j]->value;
+                    ASTNode* valNode = obj->statements[j+1];
+                    fprintf(out, "_%s_data[\"%s\"] = ", storeName, key);
+                    emitJSExpr(valNode, "", out);
+                    fprintf(out, ";\n");
+                }
+            }
+            fprintf(out, "const %s = new Proxy(_%s_data, {\n", storeName, storeName);
+            fprintf(out, "    set(target, property, value) {\n");
+            fprintf(out, "        target[property] = value;\n");
+            fprintf(out, "        updateDOM();\n");
+            fprintf(out, "        return true;\n");
+            fprintf(out, "    }\n");
+            fprintf(out, "});\n");
+        }
+    }
+    
     // 3. Pass: Emit JS for all collected instances
     for (int k = 0; k < instanceCount; k++) {
         ComponentInstance inst = instances[k];
@@ -351,9 +443,90 @@ void Transpile_to_html(ASTNode* program, const char* outputFile) {
         }
     }
     
+    // 6. Emit Store updates
+    if (globalProgram) {
+        for (int i = 0; i < globalProgram->statementCount; i++) {
+            if (globalProgram->statements[i]->type == AST_STORE_DECLARATION) {
+                ASTNode* store = globalProgram->statements[i];
+                char* storeName = store->value;
+                ASTNode* obj = store->right;
+                if (obj && obj->type == AST_OBJECT_LITERAL) {
+                    for (int j = 0; j < obj->statementCount; j += 2) {
+                        char* key = obj->statements[j]->value;
+                        fprintf(out, "    document.querySelectorAll('.bind_store_%s_%s').forEach(el => el.innerText = %s[\"%s\"]);\n", storeName, key, storeName, key);
+                    }
+                }
+            }
+        }
+    }
+    
+    fprintf(out, "}\n");
+    
+    // Emit deep differ
+    fprintf(out, "function diffDOM(realNode, tempNode) {\n");
+    fprintf(out, "    if (realNode.nodeType === 3) { if (realNode.nodeValue !== tempNode.nodeValue) realNode.nodeValue = tempNode.nodeValue; return; }\n");
+    fprintf(out, "    if (realNode.nodeType === 1 && realNode.nodeName === tempNode.nodeName) {\n");
+    fprintf(out, "        for (let i = 0; i < tempNode.attributes.length; i++) {\n");
+    fprintf(out, "            let attr = tempNode.attributes[i];\n");
+    fprintf(out, "            if (realNode.getAttribute(attr.name) !== attr.value) realNode.setAttribute(attr.name, attr.value);\n");
+    fprintf(out, "        }\n");
+    fprintf(out, "        for (let i = 0; i < tempNode.childNodes.length; i++) {\n");
+    fprintf(out, "            if (i < realNode.childNodes.length) diffDOM(realNode.childNodes[i], tempNode.childNodes[i]);\n");
+    fprintf(out, "            else realNode.appendChild(tempNode.childNodes[i].cloneNode(true));\n");
+    fprintf(out, "        }\n");
+    fprintf(out, "        while (realNode.childNodes.length > tempNode.childNodes.length) realNode.removeChild(realNode.lastChild);\n");
+    fprintf(out, "    } else {\n");
+    fprintf(out, "        realNode.replaceWith(tempNode.cloneNode(true));\n");
+    fprintf(out, "    }\n");
+    fprintf(out, "}\n");
+    fprintf(out, "function updateDOMHtml(container, html) {\n");
+    fprintf(out, "    let temp = document.createElement(container.nodeName);\n");
+    fprintf(out, "    temp.innerHTML = html;\n");
+    fprintf(out, "    for (let i = 0; i < temp.childNodes.length; i++) {\n");
+    fprintf(out, "        if (i < container.childNodes.length) diffDOM(container.childNodes[i], temp.childNodes[i]);\n");
+    fprintf(out, "        else container.appendChild(temp.childNodes[i].cloneNode(true));\n");
+    fprintf(out, "    }\n");
+    fprintf(out, "    while (container.childNodes.length > temp.childNodes.length) container.removeChild(container.lastChild);\n");
     fprintf(out, "}\n");
     
     fprintf(out, "updateDOM();\n");
+    
+    // 7. Emit Router initialization
+    if (globalProgram) {
+        for (int i = 0; i < globalProgram->statementCount; i++) {
+            if (globalProgram->statements[i]->type == AST_ROUTER_DECLARATION) {
+                ASTNode* router = globalProgram->statements[i];
+                fprintf(out, "    const gwareRoutes = {\n");
+                for (int j = 0; j < router->statementCount; j++) {
+                    ASTNode* route = router->statements[j];
+                    if (route->propertyName && route->value) {
+                        fprintf(out, "        \"%s\": \"%s\",\n", route->propertyName, route->value);
+                    }
+                }
+                fprintf(out, "    };\n");
+                fprintf(out, "    function renderRouter() {\n");
+                fprintf(out, "        let path = window.location.pathname;\n");
+                fprintf(out, "        let comp = gwareRoutes[path] || gwareRoutes[\"/\"];\n");
+                fprintf(out, "        let view = document.getElementById('app');\n");
+                fprintf(out, "        if (view) {\n");
+                fprintf(out, "            Array.from(view.children).forEach(c => c.style.display = 'none');\n");
+                fprintf(out, "            let active = view.querySelector(`.${comp}`);\n");
+                fprintf(out, "            if (active) active.style.display = 'block';\n");
+                fprintf(out, "        }\n");
+                fprintf(out, "    }\n");
+                fprintf(out, "    window.addEventListener('popstate', renderRouter);\n");
+                fprintf(out, "    function navigate(url) { history.pushState(null, '', url); renderRouter(); }\n");
+                fprintf(out, "    document.addEventListener('click', e => {\n");
+                fprintf(out, "        let a = e.target.closest('a');\n");
+                fprintf(out, "        if (a && a.getAttribute('href') && a.getAttribute('href').startsWith('/')) {\n");
+                fprintf(out, "            e.preventDefault(); navigate(a.getAttribute('href'));\n");
+                fprintf(out, "        }\n");
+                fprintf(out, "    });\n");
+                fprintf(out, "    renderRouter();\n");
+            }
+        }
+    }
+    
     fprintf(out, "</script>\n</body>\n</html>\n");
     fclose(out);
     printf(ANSI_COLOR_GREEN "Successfully transpiled to %s\n" ANSI_COLOR_RESET, outputFile);

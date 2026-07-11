@@ -544,6 +544,19 @@ Value Eval_node(ASTNode* node, Environment* env) {
             return arr;
         }
         
+        case AST_OBJECT_LITERAL: {
+            Value obj = createObject(node->statementCount / 2);
+            for (int i = 0; i < node->statementCount; i += 2) {
+                Value keyVal = Eval_node(node->statements[i], env);
+                Value valVal = Eval_node(node->statements[i+1], env);
+                if (keyVal.type != VAL_STRING) throw_error("Object keys must be strings");
+                obj.as.obj_val->keys[obj.as.obj_val->count] = strdup(keyVal.as.str_val);
+                obj.as.obj_val->values[obj.as.obj_val->count] = Value_copy(valVal);
+                obj.as.obj_val->count++;
+            }
+            return obj;
+        }
+        
         case AST_INDEX_EXPRESSION: {
             Value arrVal = Eval_node(node->left, env);
             if (arrVal.type != VAL_ARRAY && arrVal.type != VAL_STRING && arrVal.type != VAL_OBJECT) {

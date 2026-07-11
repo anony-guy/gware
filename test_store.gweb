@@ -1,0 +1,32 @@
+store AppStore {
+    user: "Guest"
+}
+
+component Login() {
+    action login {
+        set AppStore.user = "Bob"
+    }
+    view {
+        button(onclick: login) {
+            show("Login")
+        }
+    }
+}
+
+component Nav() {
+    view {
+        nav {
+            show("Welcome ")
+            show(AppStore.user)
+        }
+    }
+}
+
+component App() {
+    view {
+        div {
+            Nav {}
+            Login {}
+        }
+    }
+}

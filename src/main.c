@@ -17,7 +17,7 @@ void run_script(char* input, int isWeb) {
     ASTNode* ast = Parser_parseProgram(p);
     
     if (isWeb) {
-        Transpile_to_html(ast, "index.html");
+        Transpiler_transpileToWeb(ast, "index.html");
     } else {
         Environment* env = Environment_create(NULL);
         Eval_node(ast, env);

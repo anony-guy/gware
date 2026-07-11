@@ -3,6 +3,6 @@
 
 #include "ast.h"
 
-void Transpile_to_html(ASTNode* program, const char* outputFile);
+void Transpiler_transpileToWeb(ASTNode* program, char* outputFile);
 
 #endif

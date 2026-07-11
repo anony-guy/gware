@@ -21,6 +21,8 @@ typedef enum {
     TOKEN_EQUALS,  // ==
     TOKEN_LESS,    // <
     TOKEN_GREATER, // >
+    TOKEN_DOT,     // .
+
 
     // Delimiters
     TOKEN_LPAREN,
@@ -45,6 +47,10 @@ typedef enum {
     TOKEN_COMPONENT,
     TOKEN_ACTION,
     TOKEN_STYLE,
+    TOKEN_STORE,
+    TOKEN_ROUTER,
+    TOKEN_ROUTE,
+
     TOKEN_VIEW,
 
     // GwareWeb Symbols

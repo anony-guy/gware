@@ -1,0 +1,52 @@
+router {
+    route("/", Home)
+    route("/about", About)
+}
+
+store AppState {
+    users: []
+}
+
+component Home() {
+    action loadUsers {
+        set AppState.users = fetch("https://jsonplaceholder.typicode.com/users")
+    }
+
+    action alertMsg {
+        js("alert('Hello from Raw JS!');")
+    }
+
+    view {
+        div {
+            h1 { show("Home Page") }
+            a(href: "/about") { show("Go to About Page") }
+            br {}
+            button(onclick: loadUsers) { show("Fetch Users") }
+            button(onclick: alertMsg) { show("Test JS Interop") }
+            ul {
+                for(in: AppState.users, as: user) {
+                    li {
+                        show(user.name)
+                    }
+                }
+            }
+        }
+    }
+}
+
+component About() {
+    view {
+        div {
+            h1 { show("About Page") }
+            a(href: "/") { show("Go to Home Page") }
+            p { show("This is a Single Page Application built with GwareWeb.") }
+        }
+    }
+}
+
+component App() {
+    view {
+        Home {}
+        About {}
+    }
+}
