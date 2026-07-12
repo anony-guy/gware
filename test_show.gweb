@@ -1,0 +1,7 @@
+component Page {
+    view {
+        div {
+            show("Test")
+        }
+    }
+}

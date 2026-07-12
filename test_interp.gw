@@ -1,0 +1,7 @@
+set name = "Antigravity"
+set version = 9
+
+set greeting = $"Welcome to Gware v0.0.0.{version}, {name}!"
+show(greeting)
+
+show($"Interpolation Math: 5 + 5 = {5 + 5}")

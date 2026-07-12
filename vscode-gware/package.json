@@ -1,0 +1,30 @@
+{
+  "name": "gware",
+  "displayName": "Gware Language Support",
+  "description": "Syntax highlighting for Gware and GwareWeb",
+  "version": "0.0.1",
+  "publisher": "gware",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "gware",
+        "aliases": ["Gware", "gware"],
+        "extensions": [".gw", ".gweb"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "gware",
+        "scopeName": "source.gware",
+        "path": "./syntaxes/gware.tmLanguage.json"
+      }
+    ]
+  }
+}

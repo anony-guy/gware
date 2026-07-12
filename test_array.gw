@@ -1,0 +1,15 @@
+set arr = [1, 2, 3, 4]
+array.push(arr, 5)
+
+def double(x) {
+    return x * 2
+}
+set mapped = array.map(arr, double)
+
+def isEven(x) {
+    return (x & 1) == 0
+}
+set filtered = array.filter(mapped, isEven)
+
+show(json.stringify(mapped))
+show(json.stringify(filtered))

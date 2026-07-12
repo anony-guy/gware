@@ -1,0 +1,4 @@
+show(crypto.sha1("hello world"))
+set b = crypto.base64_encode("hello world")
+show(b)
+show(crypto.base64_decode(b))

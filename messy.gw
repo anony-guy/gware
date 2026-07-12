@@ -1,0 +1,10 @@
+def messy_func(a, b, c) {
+    set x = 10
+    if x == 10 {
+        show("Hello")
+    }
+    while x > 0 {
+        set x = x - 1
+    }
+}
+messy_func(1, 2, 3)

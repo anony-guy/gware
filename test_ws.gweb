@@ -1,0 +1,19 @@
+component App {
+    set chat_socket = ws.connect("ws://localhost:8080/chat")
+    
+    action onMessage(msg) {
+        console.log(msg.data)
+    }
+    
+    set chat_socket.onmessage = onMessage
+    
+    action sendMsg {
+        chat_socket.send("Hello")
+    }
+    
+    view {
+        button(onClick: sendMsg) {
+            show("Send WebSocket Message")
+        }
+    }
+}

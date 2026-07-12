@@ -1,0 +1,6 @@
+show("Testing ENV and Sleep:")
+set myVar = env.get("MY_VAR")
+show(myVar)
+show("Sleeping for 1 second...")
+sleep(1000)
+show("Done!")

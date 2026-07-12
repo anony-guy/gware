@@ -2,9 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-ASTNode* ASTNode_create(ASTNodeType type) {
+ASTNode* ASTNode_create_loc(ASTNodeType type, int line, const char* file) {
     ASTNode* node = (ASTNode*)malloc(sizeof(ASTNode));
     node->type = type;
+    node->line = line;
+    node->file = file ? strdup(file) : NULL;
     node->value = NULL;
     node->typeAnnotation = NULL;
     node->left = NULL;
@@ -52,6 +54,7 @@ void ASTNode_destroy(ASTNode* node) {
     if (!node) return;
     if (node->value) free(node->value);
     if (node->typeAnnotation) free(node->typeAnnotation);
+    if (node->file) free(node->file);
     if (node->propertyName) free(node->propertyName);
     ASTNode_destroy(node->left);
     ASTNode_destroy(node->right);

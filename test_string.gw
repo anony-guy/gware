@@ -1,17 +1,9 @@
-show("start")
 set s = "hello world"
-show(string_length(s))
+show(str.length(s))
+show(str.indexOf(s, "world"))
 
-show("before concat")
-set s2 = string_concat(s, " test")
-show(s2)
+set parts = str.split(s, " ")
+show(json.stringify(parts))
 
-show("before replace")
-set s3 = string_replace(s2, "world", "universe")
-show(s3)
-
-show("before split")
-set arr = string_split(s3, " ")
-show(arr)
-
-show("done")
+set new_str = str.replace(s, "hello", "goodbye")
+show(new_str)

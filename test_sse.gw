@@ -1,0 +1,26 @@
+def sse_handler(req) {
+    show("SSE Connection started on fd:")
+    show(req.fd)
+    def sse_task(fd) {
+        set count = 0
+        while (count < 5) {
+            sse_send(fd, "ping", "Hello")
+            sleep(1000)
+            set count = count + 1
+        }
+        show("SSE Task done for fd")
+        show(fd)
+    }
+    spawn(sse_task, req.fd)
+    
+    set res = {
+        sse: 1
+    }
+    return res
+}
+
+set routes = {
+    "GET /events": sse_handler
+}
+show("Listening on 8081 for SSE events...")
+http_serve(8081, routes, "public")

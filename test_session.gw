@@ -1,0 +1,31 @@
+set global_sessions = {}
+
+def login(req) {
+    set session_id = generate_uuid()
+    set global_sessions[session_id] = { user: "super_admin", role: "CEO" }
+    
+    return {
+        headers: {
+            "Set-Cookie": "session=" + session_id + "; HttpOnly; Path=/"
+        },
+        body: "Login successful! Your session ID is: " + session_id + ". Refresh to see profile."
+    }
+}
+
+def profile(req) {
+    if (req.cookies.session != null) {
+        set session_data = global_sessions[req.cookies.session]
+        if (session_data != null) {
+            return "Welcome back, " + session_data.user + "! Your role is: " + session_data.role
+        }
+    }
+    return "You are not logged in! Please go to /login"
+}
+
+set routes = {
+    "GET /login": login,
+    "GET /profile": profile
+}
+
+show("Session API listening on 8081...")
+http_serve(8081, routes, "public", 1)

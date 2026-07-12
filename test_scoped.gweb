@@ -1,0 +1,11 @@
+component Page {
+    style scoped {
+        background: "white"
+    }
+
+    view {
+        layout {
+            show("Hello inside layout!")
+        }
+    }
+}

@@ -1,0 +1,5 @@
+show(math.sin(90))
+show(math.cos(90))
+show(math.sqrt(25))
+show(math.random(100))
+show(date.now())

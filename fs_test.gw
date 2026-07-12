@@ -1,0 +1,28 @@
+def main() {
+    set msg = "Hello from File System API!"
+    set written = fs.write("test_output.txt", msg)
+    if written == 1 {
+        show("Successfully wrote to file!")
+    }
+    if written != 1 {
+        show("Failed to write to file.")
+    }
+
+    set readMsg = fs.read("test_output.txt")
+    show("Read from file:")
+    show(readMsg)
+
+    if readMsg == msg {
+        show("Verification PASS")
+    }
+    if readMsg != msg {
+        show("Verification FAIL")
+    }
+    
+    set arr = [72, 101, 108, 108, 111]
+    fs.write("test_array.txt", arr)
+    set readArr = fs.read("test_array.txt")
+    show("Read from array write:")
+    show(readArr)
+}
+main()

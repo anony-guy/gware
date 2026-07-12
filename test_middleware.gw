@@ -1,0 +1,30 @@
+def auth_mw(req) {
+    show("Auth Middleware Triggered for " + req.path)
+    if (req.path == "/secret") {
+        return "401 Unauthorized: Get Out!"
+    }
+    set req.user = "admin"
+    return null
+}
+
+def log_mw(req) {
+    show("Log Middleware Triggered for " + req.path)
+    return null
+}
+
+def home(req) {
+    return "Welcome home, " + req.user
+}
+
+def secret(req) {
+    return "This should not be reached"
+}
+
+set routes = {
+    "MIDDLEWARE": [auth_mw, log_mw],
+    "GET /": home,
+    "GET /secret": secret
+}
+
+show("Listening on 8081 for Middleware test...")
+http_serve(8081, routes, "public")

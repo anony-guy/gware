@@ -1,0 +1,6 @@
+set x = 10
+set y = (x > 5) ? "Yes" : "No"
+show(y)
+
+set z = (x < 5) ? "Yes" : "No"
+show(z)

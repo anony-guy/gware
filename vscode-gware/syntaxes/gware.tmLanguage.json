@@ -1,0 +1,101 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Gware",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#components"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.gware",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.gware",
+          "match": "\\b(if|else|while|for|in|return|break|continue|try|catch|import)\\b"
+        },
+        {
+          "name": "keyword.declaration.gware",
+          "match": "\\b(def|set|const|component|action|store|view|style|router|route)\\b"
+        },
+        {
+          "name": "keyword.operator.gware",
+          "match": "==|!=|<=|>=|<|>|\\+|-|\\*|/|=|!|\\b(and|or)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.gware",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.gware",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.gware",
+          "begin": "`",
+          "end": "`",
+          "patterns": [
+            {
+              "name": "variable.interpolation.gware",
+              "match": "\\{.*?\\}"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.gware",
+          "match": "\\b\\d+(\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.gware",
+          "match": "\\b(int|string)\\b"
+        }
+      ]
+    },
+    "components": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.gware",
+          "match": "\\b(button|div|span|h1|h2|h3|p|input|a|img)\\b"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.gware"
+}

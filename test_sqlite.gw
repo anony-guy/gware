@@ -1,0 +1,14 @@
+set db = sqlite.open("test.db")
+sqlite.exec(db, "DROP TABLE IF EXISTS users")
+sqlite.exec(db, "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Alice', 30)")
+sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Bob', 25)")
+
+set rows = sqlite.query(db, "SELECT * FROM users")
+
+for row in rows {
+    show("User: " + row["name"])
+    show("Age: " + row["age"])
+}
+
+sqlite.close(db)

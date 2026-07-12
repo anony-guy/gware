@@ -1,0 +1,11 @@
+set i = 0
+while (i < 5) {
+    set i = i + 1
+    if (i == 2) {
+        continue
+    }
+    if (i == 4) {
+        break
+    }
+    show(i)
+}

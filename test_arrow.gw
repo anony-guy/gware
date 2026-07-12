@@ -1,0 +1,4 @@
+set calculate = x => (x + 10) * 2
+
+show("Arrow function result:")
+show(calculate(5))

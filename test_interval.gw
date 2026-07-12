@@ -1,0 +1,8 @@
+set count = 0
+def tick() {
+    set count = count + 1
+    show(count)
+}
+setInterval(tick, 500)
+sleep(2000)
+show("Done")

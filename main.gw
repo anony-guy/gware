@@ -1,0 +1,10 @@
+def a() {
+    b()
+}
+def b() {
+    c()
+}
+def c() {
+    undefined_var()
+}
+a()

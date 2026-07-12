@@ -1,6 +1,5 @@
-import "utils.gw"
+import "module.gw"
 
-show("This is test_import.gw")
-say_hello("World")
-show("util_value is:")
-show(util_value)
+show(greet("Antigravity"))
+show("Global var is:")
+show(globalVar)

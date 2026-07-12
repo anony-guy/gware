@@ -4,17 +4,23 @@
 typedef enum {
     AST_PROGRAM,
     AST_SET_STATEMENT,
+    AST_CONST_STATEMENT,
     AST_EXPRESSION_STATEMENT,
     AST_IDENTIFIER,
     AST_INTEGER_LITERAL,
     AST_STRING_LITERAL,
+    AST_INTERP_STRING,
     AST_INFIX_EXPRESSION,
+    AST_TERNARY_EXPRESSION,
     AST_CALL_EXPRESSION,
     AST_IF_STATEMENT,
     AST_WHILE_STATEMENT,
+    AST_FOR_IN_STATEMENT,
     AST_BLOCK_STATEMENT,
     AST_FUNCTION_DECLARATION,
     AST_RETURN_STATEMENT,
+    AST_BREAK_STATEMENT,
+    AST_CONTINUE_STATEMENT,
     AST_TRY_STATEMENT,
     AST_IMPORT_STATEMENT,
     AST_FUNCTION_CALL,
@@ -50,9 +56,16 @@ typedef struct ASTNode {
 
     // For GwareWeb
     char* propertyName;
-    struct ASTNode** attributes; // Attributes like onClick
+    char* tag;
+    struct ASTNode** attributes;
     int attributeCount;
     int attributeCapacity;
+    struct ASTNode** children;
+    int childCount;
+    int childCapacity;
+    
+    int line;
+    char* file;
     
     // For Functions
     struct ASTNode** parameters;
@@ -60,7 +73,7 @@ typedef struct ASTNode {
     int parameterCapacity;
 } ASTNode;
 
-ASTNode* ASTNode_create(ASTNodeType type);
+ASTNode* ASTNode_create_loc(ASTNodeType type, int line, const char* file);
 void ASTNode_addStatement(ASTNode* parent, ASTNode* statement);
 void ASTNode_addAttribute(ASTNode* element, ASTNode* attribute);
 void ASTNode_addParameter(ASTNode* func, ASTNode* param);

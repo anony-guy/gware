@@ -1,0 +1,9 @@
+const PI = 3
+show(PI)
+
+try {
+    set PI = 4
+    show(PI)
+} catch (err) {
+    show($"Error: {err}")
+}

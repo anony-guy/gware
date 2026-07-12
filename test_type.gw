@@ -1,0 +1,11 @@
+set my_num = 10
+set my_str = "hello"
+set my_arr = [1, 2, 3]
+
+show(typeof(my_num))
+show(typeof(my_str))
+show(typeof(my_arr))
+
+show(is_array(my_arr))
+show(is_string(my_str))
+show(is_string(my_num))

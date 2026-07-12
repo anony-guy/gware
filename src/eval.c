@@ -1,37 +1,82 @@
 #include "eval.h"
+#ifndef GWARE_WASM
 #include <setjmp.h>
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "color.h"
+#include "vfs.h"
 
-static jmp_buf jmp_stack[64];
-static int jmp_stack_ptr = -1;
-static char last_error_msg[1024];
+#ifndef GWARE_WASM
+jmp_buf jmp_stack[64];
+int jmp_stack_ptr = -1;
+#endif
+char last_error_msg[1024];
+
+typedef struct ExecStackNode {
+    ASTNode* ast_node;
+    struct ExecStackNode* prev;
+} ExecStackNode;
+
+#ifdef GWARE_WASM
+#define THREAD_LOCAL
+#else
+#define THREAD_LOCAL __thread
+#endif
+
+ExecStackNode* exec_stack_top = NULL;
 
 void throw_error(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     vsnprintf(last_error_msg, sizeof(last_error_msg), fmt, args);
     va_end(args);
+#ifndef GWARE_WASM
     if (jmp_stack_ptr >= 0) {
         longjmp(jmp_stack[jmp_stack_ptr], 1);
     } else {
-        printf(ANSI_COLOR_RED "Runtime Error: %s\n" ANSI_COLOR_RESET, last_error_msg);
+#endif
+        fprintf(stderr, ANSI_COLOR_RED "Runtime Error: %s\n" ANSI_COLOR_RESET, last_error_msg);
+        ExecStackNode* cur = exec_stack_top;
+        int last_line = -1;
+        while (cur) {
+            if (cur->ast_node && cur->ast_node->file && cur->ast_node->line > 0) {
+                if (cur->ast_node->line != last_line) {
+                    fprintf(stderr, "  at %s:%d\n", cur->ast_node->file, cur->ast_node->line);
+                    last_line = cur->ast_node->line;
+                }
+            }
+            cur = cur->prev;
+        }
         exit(1);
+#ifndef GWARE_WASM
     }
+#endif
 }
 
+#ifndef GWARE_WASM
 #include "net.h"
-#include <string.h>
+#endif
 #include "json_api.h"
+#ifndef GWARE_WASM
 #include "sqlite_api.h"
 #include "tcp_api.h"
+#endif
 #include "lexer.h"
 #include "parser.h"
+#ifndef GWARE_WASM
+#include "net.h"
+#endif
+#include <string.h>
+#include <pthread.h>
 
 GCObject* global_gc_list = NULL;
 Environment* global_active_envs = NULL;
+pthread_mutex_t gc_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int alloc_count = 0;
+#define GC_THRESHOLD 1000
 
 int has_error = 0;
 Value createNull() { Value v; v.type = VAL_STRING; v.is_return = 0; v.as.str_val = NULL; return v; }
@@ -42,11 +87,14 @@ Value createString(char* s) {
     GCObject* obj = (GCObject*)malloc(sizeof(GCObject) + strlen(s) + 1);
     obj->type = VAL_STRING;
     obj->marked = 0;
+    pthread_mutex_lock(&gc_mutex);
     obj->next = global_gc_list;
     global_gc_list = obj;
+    pthread_mutex_unlock(&gc_mutex);
     char* str = (char*)(obj + 1);
     strcpy(str, s);
     v.as.str_val = str;
+    alloc_count++;
     return v; 
 }
 Value createFunction(ASTNode* func) { Value v; v.type = VAL_FUNCTION; v.is_return = 0; v.as.func_val = func; return v; }
@@ -58,14 +106,35 @@ Value createObject(int capacity) {
     ValueObject* obj_val = (ValueObject*)malloc(sizeof(ValueObject));
     obj_val->gc.type = VAL_OBJECT;
     obj_val->gc.marked = 0;
+    pthread_mutex_lock(&gc_mutex);
     obj_val->gc.next = global_gc_list;
     global_gc_list = (GCObject*)obj_val;
+    pthread_mutex_unlock(&gc_mutex);
     v.as.obj_val = obj_val;
     v.as.obj_val->count = 0;
     v.as.obj_val->capacity = capacity > 0 ? capacity : 4;
     v.as.obj_val->keys = (char**)malloc(sizeof(char*) * v.as.obj_val->capacity);
     v.as.obj_val->values = (Value*)malloc(sizeof(Value) * v.as.obj_val->capacity);
+    alloc_count++;
     return v;
+}
+
+void Object_set_value(ValueObject* obj, const char* key, Value val) {
+    for (int i = 0; i < obj->count; i++) {
+        if (strcmp(obj->keys[i], key) == 0) {
+            Value_free(obj->values[i]);
+            obj->values[i] = Value_copy(val);
+            return;
+        }
+    }
+    if (obj->count >= obj->capacity) {
+        obj->capacity = obj->capacity == 0 ? 4 : obj->capacity * 2;
+        obj->keys = (char**)realloc(obj->keys, sizeof(char*) * obj->capacity);
+        obj->values = (Value*)realloc(obj->values, sizeof(Value) * obj->capacity);
+    }
+    obj->keys[obj->count] = strdup(key);
+    obj->values[obj->count] = Value_copy(val);
+    obj->count++;
 }
 
 Value createArray(int capacity) {
@@ -75,16 +144,19 @@ Value createArray(int capacity) {
     ValueArray* arr_val = (ValueArray*)malloc(sizeof(ValueArray));
     arr_val->gc.type = VAL_ARRAY;
     arr_val->gc.marked = 0;
+    pthread_mutex_lock(&gc_mutex);
     arr_val->gc.next = global_gc_list;
     global_gc_list = (GCObject*)arr_val;
+    pthread_mutex_unlock(&gc_mutex);
     v.as.arr_val = arr_val;
     v.as.arr_val->count = 0;
     v.as.arr_val->capacity = capacity > 0 ? capacity : 4;
     v.as.arr_val->elements = (Value*)malloc(sizeof(Value) * v.as.arr_val->capacity);
+    alloc_count++;
     return v;
 }
 
-static Value createNativeFunction(NativeFn fn) {
+Value createNativeFunction(NativeFn fn) {
     Value v;
     v.type = VAL_NATIVE_FUNCTION;
     v.is_return = 0;
@@ -92,44 +164,162 @@ static Value createNativeFunction(NativeFn fn) {
     return v;
 }
 
-Value native_read_file(int argCount, Value* args) {
-    if (argCount != 1 || args[0].type != VAL_STRING) {
-        throw_error("read_file expects 1 string argument");
-    }
-    FILE* f = fopen(args[0].as.str_val, "r");
-    if (!f) return createNull();
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* buf = malloc(size + 1);
-    fread(buf, 1, size, f);
-    buf[size] = '\0';
-    fclose(f);
-    Value res = createString(buf);
-    free(buf);
-    return res;
-}
 
-Value native_write_file(int argCount, Value* args) {
-    if (argCount != 2 || args[0].type != VAL_STRING || args[1].type != VAL_STRING) {
-        throw_error("write_file expects 2 string arguments");
-    }
-    FILE* f = fopen(args[0].as.str_val, "w");
-    if (!f) return createInt(0);
-    fputs(args[1].as.str_val, f);
-    fclose(f);
-    return createInt(1);
-}
 
+#ifndef GWARE_WASM
 Value native_fetch(int argCount, Value* args) {
-    if (argCount != 1 || args[0].type != VAL_STRING) {
-        throw_error("fetch expects (url)");
-    }
-    char* res = fetch_url(args[0].as.str_val);
+    if (argCount < 1 || args[0].type != VAL_STRING) return createNull();
+    char* res = fetch_url_ext(args[0].as.str_val, "GET", NULL);
     if (!res) return createNull();
     Value v = createString(res);
     free(res);
     return v;
+}
+
+typedef struct {
+    Value func;
+    Value arg;
+} SpawnArgs;
+
+void* spawn_thread_func(void* arg) {
+    SpawnArgs* sa = (SpawnArgs*)arg;
+    Environment* env = Environment_create(get_global_env());
+    Value argsArr[1] = { sa->arg };
+    invokeFunction(sa->func, (sa->arg.type == VAL_STRING && sa->arg.as.str_val == NULL) ? 0 : 1, argsArr, env, NULL);
+    Environment_destroy(env);
+    Value_free(sa->func);
+    Value_free(sa->arg);
+    free(sa);
+    return NULL;
+}
+
+Value native_spawn(int argCount, Value* args) {
+    if (argCount < 1 || (args[0].type != VAL_FUNCTION && args[0].type != VAL_NATIVE_FUNCTION)) {
+        throw_error("spawn expects a function");
+        return createNull();
+    }
+    SpawnArgs* sa = malloc(sizeof(SpawnArgs));
+    sa->func = Value_copy(args[0]);
+    sa->arg = argCount > 1 ? Value_copy(args[1]) : createNull();
+    
+    pthread_t t;
+    pthread_create(&t, NULL, spawn_thread_func, sa);
+    pthread_detach(t);
+    return createInt(1);
+}
+
+#ifdef _WIN32
+void __stdcall Sleep(unsigned long dwMilliseconds);
+#else
+#include <unistd.h>
+#endif
+Value native_sleep(int argCount, Value* args) {
+    if (argCount < 1 || args[0].type != VAL_INT) return createNull();
+#ifdef _WIN32
+    Sleep(args[0].as.int_val);
+#else
+    usleep(args[0].as.int_val * 1000);
+#endif
+    return createNull();
+}
+
+typedef struct {
+    Value func;
+    int ms;
+    int is_interval;
+} TimerArgs;
+
+void* timer_thread_func(void* arg) {
+    TimerArgs* ta = (TimerArgs*)arg;
+    while (1) {
+#ifdef _WIN32
+        Sleep(ta->ms);
+#else
+        usleep(ta->ms * 1000);
+#endif
+        Environment* env = Environment_create(get_global_env());
+        invokeFunction(ta->func, 0, NULL, env, NULL);
+        Environment_destroy(env);
+        if (!ta->is_interval) break;
+    }
+    Value_free(ta->func);
+    free(ta);
+    return NULL;
+}
+
+Value native_set_timeout(int argCount, Value* args) {
+    if (argCount < 2 || (args[0].type != VAL_FUNCTION && args[0].type != VAL_NATIVE_FUNCTION) || args[1].type != VAL_INT) {
+        throw_error("setTimeout expects (function, ms)");
+        return createNull();
+    }
+    TimerArgs* ta = malloc(sizeof(TimerArgs));
+    ta->func = Value_copy(args[0]);
+    ta->ms = args[1].as.int_val;
+    ta->is_interval = 0;
+    
+    pthread_t t;
+    pthread_create(&t, NULL, timer_thread_func, ta);
+    pthread_detach(t);
+    return createInt(1);
+}
+
+Value native_set_interval(int argCount, Value* args) {
+    if (argCount < 2 || (args[0].type != VAL_FUNCTION && args[0].type != VAL_NATIVE_FUNCTION) || args[1].type != VAL_INT) {
+        throw_error("setInterval expects (function, ms)");
+        return createNull();
+    }
+    TimerArgs* ta = malloc(sizeof(TimerArgs));
+    ta->func = Value_copy(args[0]);
+    ta->ms = args[1].as.int_val;
+    ta->is_interval = 1;
+    
+    pthread_t t;
+    pthread_create(&t, NULL, timer_thread_func, ta);
+    pthread_detach(t);
+    return createInt(1);
+}
+#endif
+Value native_uuid(int argCount, Value* args) {
+    char uuid[37];
+    const char *chars = "0123456789abcdef";
+    for (int i = 0; i < 36; i++) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            uuid[i] = '-';
+        } else if (i == 14) {
+            uuid[i] = '4';
+        } else if (i == 19) {
+            uuid[i] = chars[(rand() % 4) + 8];
+        } else {
+            uuid[i] = chars[rand() % 16];
+        }
+    }
+    uuid[36] = '\0';
+    return createString(uuid);
+}
+
+static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+Value native_base64_encode(int argCount, Value* args) {
+    if (argCount < 1 || args[0].type != VAL_STRING) return createNull();
+    char* src = args[0].as.str_val;
+    int len = strlen(src);
+    int out_len = 4 * ((len + 2) / 3);
+    char* out = malloc(out_len + 1);
+    int i, j;
+    for (i = 0, j = 0; i < len;) {
+        uint32_t octet_a = i < len ? (unsigned char)src[i++] : 0;
+        uint32_t octet_b = i < len ? (unsigned char)src[i++] : 0;
+        uint32_t octet_c = i < len ? (unsigned char)src[i++] : 0;
+        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+        out[j++] = base64_table[(triple >> 18) & 0x3F];
+        out[j++] = base64_table[(triple >> 12) & 0x3F];
+        out[j++] = base64_table[(triple >> 6) & 0x3F];
+        out[j++] = base64_table[triple & 0x3F];
+    }
+    for (int k = 0; k < (3 - len % 3) % 3; k++) out[out_len - 1 - k] = '=';
+    out[out_len] = '\0';
+    Value res = createString(out);
+    free(out);
+    return res;
 }
 
 // --- String Stdlib ---
@@ -231,15 +421,26 @@ Environment* Environment_create(Environment* parent) {
     env->capacity = 0;
     env->parent = parent;
     
+    pthread_mutex_lock(&gc_mutex);
     env->next_active = global_active_envs;
     global_active_envs = env;
+    pthread_mutex_unlock(&gc_mutex);
     
     // Register native functions in the global environment
     if (parent == NULL) {
         global_env = env;
-        Environment_set(env, "read_file", createNativeFunction(native_read_file), NULL);
-        Environment_set(env, "write_file", createNativeFunction(native_write_file), NULL);
+#ifndef GWARE_WASM
         Environment_set(env, "fetch", createNativeFunction(native_fetch), NULL);
+        Environment_set(env, "spawn", createNativeFunction(native_spawn), NULL);
+        Environment_set(env, "sleep", createNativeFunction(native_sleep), NULL);
+#endif
+        Environment_set(env, "null", createNull(), NULL);
+#ifndef GWARE_WASM
+        Environment_set(env, "setTimeout", createNativeFunction(native_set_timeout), NULL);
+        Environment_set(env, "setInterval", createNativeFunction(native_set_interval), NULL);
+#endif
+        Environment_set(env, "generate_uuid", createNativeFunction(native_uuid), NULL);
+        Environment_set(env, "base64_encode", createNativeFunction(native_base64_encode), NULL);
         Environment_set(env, "json_parse", createNativeFunction(native_json_parse), NULL);
         Environment_set(env, "json_stringify", createNativeFunction(native_json_stringify), NULL);
         
@@ -249,8 +450,10 @@ Environment* Environment_create(Environment* parent) {
         Environment_set(env, "string_split", createNativeFunction(native_string_split), NULL);
         Environment_set(env, "string_replace", createNativeFunction(native_string_replace), NULL);
 
+#ifndef GWARE_WASM
         register_sqlite_api(env);
         register_tcp_api(env);
+#endif
     }
     return env;
 }
@@ -311,13 +514,19 @@ Value* Environment_get_ref(Environment* env, char* name) {
 
 void Environment_destroy(Environment* env) {
     if (!env) return;
+    pthread_mutex_lock(&gc_mutex);
     if (global_active_envs == env) {
         global_active_envs = env->next_active;
     } else {
         Environment* curr = global_active_envs;
-        while (curr && curr->next_active != env) curr = curr->next_active;
-        if (curr) curr->next_active = env->next_active;
+        while (curr && curr->next_active != env) {
+            curr = curr->next_active;
+        }
+        if (curr) {
+            curr->next_active = env->next_active;
+        }
     }
+    pthread_mutex_unlock(&gc_mutex);
     for (int i = 0; i < env->count; i++) {
         free(env->names[i]);
         if (env->types[i]) free(env->types[i]);
@@ -347,7 +556,8 @@ void mark_value(Value v) {
     }
 }
 
-void gc_collect(void) {
+void gc_collect() {
+    pthread_mutex_lock(&gc_mutex);
     Environment* env = global_active_envs;
     while (env) {
         for (int i = 0; i < env->count; i++) {
@@ -362,14 +572,21 @@ void gc_collect(void) {
             GCObject* unreached = *curr;
             *curr = unreached->next;
             
-            if (unreached->type == VAL_ARRAY) {
-                ValueArray* arr = (ValueArray*)unreached;
-                if (arr->elements) free(arr->elements);
+            if (unreached->type == VAL_STRING) {
             } else if (unreached->type == VAL_OBJECT) {
                 ValueObject* obj = (ValueObject*)unreached;
-                for (int i=0; i<obj->count; i++) free(obj->keys[i]);
-                if (obj->keys) free(obj->keys);
-                if (obj->values) free(obj->values);
+                for (int i=0; i<obj->count; i++) {
+                    free(obj->keys[i]);
+                    Value_free(obj->values[i]);
+                }
+                free(obj->keys);
+                free(obj->values);
+            } else if (unreached->type == VAL_ARRAY) {
+                ValueArray* arr = (ValueArray*)unreached;
+                for (int i=0; i<arr->count; i++) {
+                    Value_free(arr->elements[i]);
+                }
+                free(arr->elements);
             }
             free(unreached);
         } else {
@@ -377,6 +594,7 @@ void gc_collect(void) {
             curr = &(*curr)->next;
         }
     }
+    pthread_mutex_unlock(&gc_mutex);
 }
 
 static int isTruthy(Value v) {
@@ -388,7 +606,7 @@ static int isTruthy(Value v) {
     return 1;
 }
 
-Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv) {
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv, Value* thisObj) {
     if (funcVal.type == VAL_NATIVE_FUNCTION) {
         return funcVal.as.native_fn(argCount, args);
     }
@@ -411,7 +629,21 @@ Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* pare
     return createNull();
 }
 
+Value Eval_node_inner(ASTNode* node, Environment* env);
 Value Eval_node(ASTNode* node, Environment* env) {
+    if (!node) return createNull();
+    ExecStackNode stack_node;
+    stack_node.ast_node = node;
+    stack_node.prev = exec_stack_top;
+    exec_stack_top = &stack_node;
+
+    Value res = Eval_node_inner(node, env);
+
+    exec_stack_top = stack_node.prev;
+    return res;
+}
+
+Value Eval_node_inner(ASTNode* node, Environment* env) {
     if (!node) return createNull();
     
     switch (node->type) {
@@ -419,10 +651,12 @@ Value Eval_node(ASTNode* node, Environment* env) {
         case AST_BLOCK_STATEMENT: {
             Value result = createNull();
             for (int i = 0; i < node->statementCount; i++) {
-                result = Eval_node(node->statements[i], env);
-                if (result.is_return) {
-                    return result;
+                if (alloc_count > GC_THRESHOLD) {
+                    alloc_count = 0;
+                    gc_collect();
                 }
+                result = Eval_node(node->statements[i], env);
+                if (result.is_return) return result;
             }
             return result;
         }
@@ -430,33 +664,37 @@ Value Eval_node(ASTNode* node, Environment* env) {
         case AST_IMPORT_STATEMENT: {
             if (!node->value) return createNull();
             char* filename = node->value;
-            FILE* fp = fopen(filename, "r");
-            if (!fp) {
-                char err[512];
-                snprintf(err, sizeof(err), "Import error: Could not open file '%s'", filename);
-                throw_error(err);
-                return createNull();
+            char* source = vfs_get_file(filename);
+            int from_vfs = 1;
+            
+            if (!source) {
+                from_vfs = 0;
+                FILE* fp = fopen(filename, "r");
+                if (!fp) {
+                    char err[512];
+                    snprintf(err, sizeof(err), "Import error: Could not open file '%s'", filename);
+                    throw_error(err);
+                    return createNull();
+                }
+                fseek(fp, 0, SEEK_END);
+                long fsize = ftell(fp);
+                fseek(fp, 0, SEEK_SET);
+                source = malloc(fsize + 1);
+                fread(source, 1, fsize, fp);
+                source[fsize] = 0;
+                fclose(fp);
             }
-            fseek(fp, 0, SEEK_END);
-            long fsize = ftell(fp);
-            fseek(fp, 0, SEEK_SET);
-            char* source = malloc(fsize + 1);
-            fread(source, 1, fsize, fp);
-            source[fsize] = 0;
-            fclose(fp);
 
-            Lexer* l = Lexer_create(source);
+            Lexer* l = Lexer_create(source, filename);
             Parser* p = Parser_create(l);
-            ASTNode* program = Parser_parseProgram(p);
-            
-            Value result = createNull();
-            if (program) {
-                result = Eval_node(program, env); // Evaluate in the current environment
-                // No ASTNode_destroy since eval doesn't clean it up
+            ASTNode* ast = Parser_parseProgram(p);
+            Value result = Eval_node(ast, env);
+            ASTNode_destroy(ast);
+            Parser_destroy(p);
+            Lexer_destroy(l);
+            if (!from_vfs) {
+                free(source);
             }
-            
-            free(source);
-            // Parser/Lexer are leaked here since no proper free functions, which is fine for now
             return result;
         }
             
@@ -535,12 +773,26 @@ Value Eval_node(ASTNode* node, Environment* env) {
             return createNull();
         }
         
+        case AST_TERNARY_EXPRESSION: {
+            Value condition = Eval_node(node->left, env);
+            if (isTruthy(condition)) {
+                return Eval_node(node->right->statements[0], env);
+            } else {
+                return Eval_node(node->right->statements[1], env);
+            }
+        }
+        
         case AST_TRY_STATEMENT: {
+#ifndef GWARE_WASM
             jmp_stack_ptr++;
             if (setjmp(jmp_stack[jmp_stack_ptr]) == 0) {
+#endif
                 Value res = Eval_node(node->left, env);
+#ifndef GWARE_WASM
                 jmp_stack_ptr--;
+#endif
                 return res;
+#ifndef GWARE_WASM
             } else {
                 jmp_stack_ptr--;
                 if (node->right) {
@@ -554,15 +806,47 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 }
                 return createNull();
             }
+#endif
         }
         
         case AST_WHILE_STATEMENT: {
-            Value result = createNull();
-            while (isTruthy(Eval_node(node->left, env))) {
-                result = Eval_node(node->right, env);
-                if (result.is_return) return result;
+            Value ret = createNull();
+            while (1) {
+                if (alloc_count > GC_THRESHOLD) {
+                    alloc_count = 0;
+                    gc_collect();
+                }
+                Value condition = Eval_node(node->left, env);
+                if (!isTruthy(condition)) break;
+                ret = Eval_node(node->right, env);
+                if (ret.is_return) return ret;
+                if (ret.is_break) { ret.is_break = 0; break; }
+                if (ret.is_continue) { ret.is_continue = 0; continue; }
             }
-            return result;
+            return ret;
+        }
+        
+        case AST_FOR_IN_STATEMENT: {
+            Value arrayVal = Eval_node(node->left, env);
+            if (arrayVal.type != VAL_ARRAY) {
+                throw_error("for-in loop requires an array");
+            }
+            Value ret = createNull();
+            for (int i = 0; i < arrayVal.as.arr_val->count; i++) {
+                if (alloc_count > GC_THRESHOLD) {
+                    alloc_count = 0;
+                    gc_collect();
+                }
+                Environment* blockEnv = Environment_create(env);
+                Environment_set(blockEnv, node->value, arrayVal.as.arr_val->elements[i], NULL);
+                ret = Eval_node(node->right, blockEnv);
+                if (ret.is_return) {
+                    return ret;
+                }
+                if (ret.is_break) { ret.is_break = 0; break; }
+                if (ret.is_continue) { ret.is_continue = 0; continue; }
+            }
+            return ret;
         }
         
         case AST_FUNCTION_DECLARATION: {
@@ -572,10 +856,24 @@ Value Eval_node(ASTNode* node, Environment* env) {
         }
         
         case AST_RETURN_STATEMENT: {
-            Value val = createNull();
-            if (node->left) val = Eval_node(node->left, env);
-            val.is_return = 1;
-            return val;
+            Value ret = createNull();
+            if (node->left) {
+                ret = Eval_node(node->left, env);
+            }
+            ret.is_return = 1;
+            return ret;
+        }
+        
+        case AST_BREAK_STATEMENT: {
+            Value ret = createNull();
+            ret.is_break = 1;
+            return ret;
+        }
+        
+        case AST_CONTINUE_STATEMENT: {
+            Value ret = createNull();
+            ret.is_continue = 1;
+            return ret;
         }
         
         case AST_ARRAY_LITERAL: {
@@ -644,56 +942,125 @@ Value Eval_node(ASTNode* node, Environment* env) {
                 if (leftVal.type == VAL_INT && rightVal.type == VAL_INT) {
                     return createInt(leftVal.as.int_val == rightVal.as.int_val);
                 } else if (leftVal.type == VAL_STRING && rightVal.type == VAL_STRING) {
+                    if (leftVal.as.str_val == NULL && rightVal.as.str_val == NULL) return createInt(1);
+                    if (leftVal.as.str_val == NULL || rightVal.as.str_val == NULL) return createInt(0);
                     return createInt(strcmp(leftVal.as.str_val, rightVal.as.str_val) == 0);
+                } else if (leftVal.type == VAL_STRING && leftVal.as.str_val == NULL) {
+                    return createInt(0); // comparing null with int or other
+                } else if (rightVal.type == VAL_STRING && rightVal.as.str_val == NULL) {
+                    return createInt(0);
                 }
                 throw_error("Cannot compare differing types with ==");
             }
             
+            if (strcmp(node->value, "!=") == 0) {
+                if (leftVal.type == VAL_INT && rightVal.type == VAL_INT) {
+                    return createInt(leftVal.as.int_val != rightVal.as.int_val);
+                } else if (leftVal.type == VAL_STRING && rightVal.type == VAL_STRING) {
+                    if (leftVal.as.str_val == NULL && rightVal.as.str_val == NULL) return createInt(0);
+                    if (leftVal.as.str_val == NULL || rightVal.as.str_val == NULL) return createInt(1);
+                    return createInt(strcmp(leftVal.as.str_val, rightVal.as.str_val) != 0);
+                } else if (leftVal.type == VAL_STRING && leftVal.as.str_val == NULL) {
+                    return createInt(1);
+                } else if (rightVal.type == VAL_STRING && rightVal.as.str_val == NULL) {
+                    return createInt(1);
+                }
+                throw_error("Cannot compare differing types with !=");
+            }
+            
+            if (strcmp(node->value, "+") == 0) {
+                if (leftVal.type == VAL_STRING && rightVal.type == VAL_STRING) {
+                    int len = strlen(leftVal.as.str_val) + strlen(rightVal.as.str_val) + 1;
+                    char* newStr = malloc(len);
+                    strcpy(newStr, leftVal.as.str_val);
+                    strcat(newStr, rightVal.as.str_val);
+                    Value res = createString(newStr);
+                    free(newStr);
+                    return res;
+                }
+            }
+            
             if (leftVal.type != VAL_INT || rightVal.type != VAL_INT) {
-                throw_error("Math operations (+, -, *, /, <, >) require 'int' types.");
+                throw_error("Math operations (+, -, *, /, <, >) require matching valid types.");
             }
             
             if (strcmp(node->value, "+") == 0) return createInt(leftVal.as.int_val + rightVal.as.int_val);
             if (strcmp(node->value, "-") == 0) return createInt(leftVal.as.int_val - rightVal.as.int_val);
             if (strcmp(node->value, "*") == 0) return createInt(leftVal.as.int_val * rightVal.as.int_val);
             if (strcmp(node->value, "/") == 0) {
-                if (rightVal.as.int_val == 0) {
-                    throw_error("Division by zero.");
-                }
+                if (rightVal.as.int_val == 0) throw_error("Division by zero.");
                 return createInt(leftVal.as.int_val / rightVal.as.int_val);
             }
             if (strcmp(node->value, "<") == 0) return createInt(leftVal.as.int_val < rightVal.as.int_val);
             if (strcmp(node->value, ">") == 0) return createInt(leftVal.as.int_val > rightVal.as.int_val);
+            if (strcmp(node->value, "&") == 0) return createInt(leftVal.as.int_val & rightVal.as.int_val);
+            if (strcmp(node->value, "|") == 0) return createInt(leftVal.as.int_val | rightVal.as.int_val);
+            if (strcmp(node->value, "^") == 0) return createInt(leftVal.as.int_val ^ rightVal.as.int_val);
+            if (strcmp(node->value, "<<") == 0) return createInt(leftVal.as.int_val << rightVal.as.int_val);
+            if (strcmp(node->value, ">>") == 0) return createInt(leftVal.as.int_val >> rightVal.as.int_val);
             
             return createNull();
         }
         
-        case AST_CALL_EXPRESSION: {
-            if (strcmp(node->left->value, "show") == 0) {
-                Value val = Eval_node(node->right, env);
+        case AST_CALL_EXPRESSION: 
+        case AST_FUNCTION_CALL: {
+            int is_show = 0;
+            char* func_name = NULL;
+            if (node->type == AST_FUNCTION_CALL && node->value) {
+                func_name = node->value;
+            } else if (node->left && node->left->type == AST_IDENTIFIER && node->left->value) {
+                func_name = node->left->value;
+            }
+            
+            if (func_name && strcmp(func_name, "show") == 0) {
+                Value val = createNull();
+                if (node->parameterCount > 0) val = Eval_node(node->parameters[0], env);
                 if (val.type == VAL_INT) printf("%d\n", val.as.int_val);
                 else if (val.type == VAL_STRING) printf("%s\n", val.as.str_val ? val.as.str_val : "null");
                 else if (val.type == VAL_ARRAY) printf("[Array count=%d]\n", val.as.arr_val->count);
-
                 else if (val.type == VAL_OBJECT) printf("[Object keys=%d]\n", val.as.obj_val->count);
                 fflush(stdout);
                 return val;
             }
-            throw_error("unknown function '%s'", node->left->value);
-        }
-        
-        case AST_FUNCTION_CALL: {
-            int found = 0;
-            Value funcVal = Environment_get(env, node->value, &found);
-            if (!found || (funcVal.type != VAL_FUNCTION && funcVal.type != VAL_NATIVE_FUNCTION)) {
-                throw_error("Undefined function '%s'", node->value);
+            
+            if (func_name && strcmp(func_name, "assert") == 0) {
+                if (node->parameterCount < 1) throw_error("assert requires at least 1 argument");
+                Value condition = Eval_node(node->parameters[0], env);
+                if (!isTruthy(condition)) {
+                    if (node->parameterCount > 1) {
+                        Value msg = Eval_node(node->parameters[1], env);
+                        throw_error("Assertion failed: %s", msg.type == VAL_STRING && msg.as.str_val ? msg.as.str_val : "unknown");
+                    } else {
+                        throw_error("Assertion failed");
+                    }
+                }
+                return createNull();
+            }
+            
+            Value funcVal;
+            if (node->type == AST_FUNCTION_CALL && node->value) {
+                int found = 0;
+                funcVal = Environment_get(env, node->value, &found);
+            } else {
+                funcVal = Eval_node(node->left, env);
+            }
+            if (funcVal.type != VAL_FUNCTION && funcVal.type != VAL_NATIVE_FUNCTION) {
+                throw_error("Attempted to call a non-function");
+                return createNull();
+            }
+            
+            Value* thisObj = NULL;
+            Value objVal;
+            if (node->left && node->left->type == AST_INDEX_EXPRESSION) {
+                objVal = Eval_node(node->left->left, env);
+                thisObj = &objVal;
             }
             
             Value* args = malloc(sizeof(Value) * node->parameterCount);
             for (int i = 0; i < node->parameterCount; i++) {
                 args[i] = Eval_node(node->parameters[i], env);
             }
-            Value res = invokeFunction(funcVal, node->parameterCount, args, env);
+            Value res = invokeFunction(funcVal, node->parameterCount, args, env, thisObj);
             for (int i = 0; i < node->parameterCount; i++) {
                 Value_free(args[i]);
             }

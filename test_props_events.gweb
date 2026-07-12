@@ -1,0 +1,45 @@
+component Modal {
+    set title = "Default Title"
+    
+    action handleClose {
+        emit("onClose", "Data from modal!")
+    }
+
+    view {
+        div(class: "modal") {
+            h1 {
+                show(title)
+            }
+            button(onClick: handleClose) {
+                show("Close Modal")
+            }
+        }
+    }
+
+    style {
+        border: "1px solid black"
+        padding: "20px"
+    }
+}
+
+component Main {
+    set modalOpen = 1
+    set result = ""
+    
+    action onModalClose(data) {
+        set modalOpen = 0
+        set result = data
+    }
+
+    view {
+        div {
+            if (modalOpen) {
+                Modal(title: "Hello from Parent!", onClose: "onModalClose") {}
+            }
+            p {
+                show("Result: ")
+                show(result)
+            }
+        }
+    }
+}

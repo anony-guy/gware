@@ -1,0 +1,4 @@
+fn App() {
+    return <div>Hello GwareWeb!</div>
+}
+render(<App />)

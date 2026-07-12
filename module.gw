@@ -1,0 +1,8 @@
+def greet(name) {
+    show("Hello")
+    show(name)
+    show("from module.gw!")
+    return "done"
+}
+
+set globalVar = 42

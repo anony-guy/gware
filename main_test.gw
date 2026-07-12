@@ -1,0 +1,7 @@
+import "lib_test.gw"
+
+def main() {
+    show("Running packaged executable!")
+    show(get_message())
+}
+main()

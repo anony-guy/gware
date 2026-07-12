@@ -14,9 +14,10 @@ enum {
     PREC_INDEX
 };
 
-static int getPrecedence(TokenType type) {
+static int getPrecedence(GwTokenType type) {
     switch (type) {
-        case TOKEN_EQUALS: return PREC_EQUALS;
+        case TOKEN_EQUALS: 
+        case TOKEN_NOT_EQ: return PREC_EQUALS;
         case TOKEN_LESS: return PREC_LESSGREATER;
         case TOKEN_GREATER: return PREC_LESSGREATER;
         case TOKEN_PLUS: return PREC_SUM;
@@ -61,7 +62,7 @@ static ASTNode* parsePrimary(Parser* p) {
     ASTNode* node = NULL;
     if (p->curToken.type == TOKEN_IDENTIFIER) {
         if (p->peekToken.type == TOKEN_LPAREN) {
-            node = ASTNode_create(AST_FUNCTION_CALL);
+            node = ASTNode_create_loc(AST_FUNCTION_CALL, p->curToken.line, p->curToken.file);
             node->value = strdup(p->curToken.literal);
             nextToken(p); // consume identifier
             nextToken(p); // consume (
@@ -72,20 +73,20 @@ static ASTNode* parsePrimary(Parser* p) {
             }
             if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
         } else {
-            node = ASTNode_create(AST_IDENTIFIER);
+            node = ASTNode_create_loc(AST_IDENTIFIER, p->curToken.line, p->curToken.file);
             node->value = strdup(p->curToken.literal);
             nextToken(p);
         }
     } else if (p->curToken.type == TOKEN_NUMBER) {
-        node = ASTNode_create(AST_INTEGER_LITERAL);
+        node = ASTNode_create_loc(AST_INTEGER_LITERAL, p->curToken.line, p->curToken.file);
         node->value = strdup(p->curToken.literal);
         nextToken(p);
     } else if (p->curToken.type == TOKEN_STRING) {
-        node = ASTNode_create(AST_STRING_LITERAL);
+        node = ASTNode_create_loc(AST_STRING_LITERAL, p->curToken.line, p->curToken.file);
         node->value = strdup(p->curToken.literal);
         nextToken(p);
     } else if (p->curToken.type == TOKEN_LBRACKET) {
-        node = ASTNode_create(AST_ARRAY_LITERAL);
+        node = ASTNode_create_loc(AST_ARRAY_LITERAL, p->curToken.line, p->curToken.file);
         nextToken(p); // consume [
         while (p->curToken.type != TOKEN_RBRACKET && p->curToken.type != TOKEN_EOF) {
             ASTNode* elem = parseExpression(p, PREC_LOWEST);
@@ -94,15 +95,15 @@ static ASTNode* parsePrimary(Parser* p) {
         }
         if (p->curToken.type == TOKEN_RBRACKET) nextToken(p);
     } else if (p->curToken.type == TOKEN_LBRACE) {
-        node = ASTNode_create(AST_OBJECT_LITERAL);
+        node = ASTNode_create_loc(AST_OBJECT_LITERAL, p->curToken.line, p->curToken.file);
         nextToken(p); // consume {
         while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
             ASTNode* key = NULL;
             if (p->curToken.type == TOKEN_STRING) {
-                key = ASTNode_create(AST_STRING_LITERAL);
+                key = ASTNode_create_loc(AST_STRING_LITERAL, p->curToken.line, p->curToken.file);
                 key->value = strdup(p->curToken.literal);
             } else if (p->curToken.type == TOKEN_IDENTIFIER) {
-                key = ASTNode_create(AST_STRING_LITERAL);
+                key = ASTNode_create_loc(AST_STRING_LITERAL, p->curToken.line, p->curToken.file);
                 key->value = strdup(p->curToken.literal);
             } else {
                 printf(ANSI_COLOR_RED "Parse error: expected string or identifier for object key, got '%s'\n" ANSI_COLOR_RESET, p->curToken.literal);
@@ -124,7 +125,7 @@ static ASTNode* parsePrimary(Parser* p) {
         }
         if (p->curToken.type == TOKEN_RBRACE) nextToken(p);
     } else if (p->curToken.type == TOKEN_DEF) {
-        node = ASTNode_create(AST_FUNCTION_DECLARATION);
+        node = ASTNode_create_loc(AST_FUNCTION_DECLARATION, p->curToken.line, p->curToken.file);
         nextToken(p); // consume 'def'
         if (p->curToken.type == TOKEN_IDENTIFIER) {
             node->value = strdup(p->curToken.literal);
@@ -135,7 +136,7 @@ static ASTNode* parsePrimary(Parser* p) {
         if (p->curToken.type == TOKEN_LPAREN) {
             nextToken(p);
             while (p->curToken.type != TOKEN_RPAREN && p->curToken.type != TOKEN_EOF) {
-                ASTNode* param = ASTNode_create(AST_IDENTIFIER);
+                ASTNode* param = ASTNode_create_loc(AST_IDENTIFIER, p->curToken.line, p->curToken.file);
                 if (p->curToken.type == TOKEN_TYPE_INT || p->curToken.type == TOKEN_TYPE_STRING) {
                     param->typeAnnotation = strdup(p->curToken.literal);
                     nextToken(p);
@@ -158,7 +159,7 @@ static ASTNode* parsePrimary(Parser* p) {
 }
 
 static ASTNode* parseArrayLiteral(Parser* p) {
-    ASTNode* arrayNode = ASTNode_create(AST_ARRAY_LITERAL);
+    ASTNode* arrayNode = ASTNode_create_loc(AST_ARRAY_LITERAL, p->curToken.line, p->curToken.file);
     nextToken(p); // consume '['
     while (p->curToken.type != TOKEN_RBRACKET && p->curToken.type != TOKEN_EOF) {
         ASTNode* expr = parseExpression(p, 0); // LOWEST precedence
@@ -180,7 +181,7 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
         
         if (opToken.type == TOKEN_LBRACKET) {
             nextToken(p); // consume [
-            ASTNode* expr = ASTNode_create(AST_INDEX_EXPRESSION);
+            ASTNode* expr = ASTNode_create_loc(AST_INDEX_EXPRESSION, p->curToken.line, p->curToken.file);
             expr->left = left;
             expr->right = parseExpression(p, PREC_LOWEST);
             if (p->curToken.type == TOKEN_RBRACKET) nextToken(p);
@@ -190,10 +191,12 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
         
         if (opToken.type == TOKEN_LPAREN) {
             nextToken(p); // consume (
-            ASTNode* expr = ASTNode_create(AST_CALL_EXPRESSION);
+            ASTNode* expr = ASTNode_create_loc(AST_CALL_EXPRESSION, p->curToken.line, p->curToken.file);
             expr->left = left;
-            if (p->curToken.type != TOKEN_RPAREN) {
-                expr->right = parseExpression(p, PREC_LOWEST);
+            while (p->curToken.type != TOKEN_RPAREN && p->curToken.type != TOKEN_EOF) {
+                ASTNode* arg = parseExpression(p, PREC_LOWEST);
+                if (arg) ASTNode_addParameter(expr, arg);
+                if (p->curToken.type == TOKEN_COMMA) nextToken(p);
             }
             if (p->curToken.type == TOKEN_RPAREN) nextToken(p);
             left = expr;
@@ -202,12 +205,12 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
         
         if (opToken.type == TOKEN_DOT) {
             nextToken(p); // consume .
-            ASTNode* expr = ASTNode_create(AST_INDEX_EXPRESSION);
+            ASTNode* expr = ASTNode_create_loc(AST_INDEX_EXPRESSION, p->curToken.line, p->curToken.file);
             expr->left = left;
             if (p->curToken.type != TOKEN_IDENTIFIER) {
                 printf(ANSI_COLOR_RED "Parse error: expected identifier after '.'\n" ANSI_COLOR_RESET);
             } else {
-                expr->right = ASTNode_create(AST_STRING_LITERAL);
+                expr->right = ASTNode_create_loc(AST_STRING_LITERAL, p->curToken.line, p->curToken.file);
                 expr->right->value = strdup(p->curToken.literal);
                 nextToken(p); // consume identifier
             }
@@ -215,7 +218,7 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
             continue;
         }
         
-        ASTNode* expr = ASTNode_create(AST_INFIX_EXPRESSION);
+        ASTNode* expr = ASTNode_create_loc(AST_INFIX_EXPRESSION, p->curToken.line, p->curToken.file);
         expr->value = strdup(opToken.literal);
         expr->left = left;
         
@@ -229,7 +232,7 @@ static ASTNode* parseExpression(Parser* p, int precedence) {
 }
 
 static ASTNode* parseSetStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_SET_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_SET_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); 
     
     if (p->curToken.type == TOKEN_TYPE_INT || p->curToken.type == TOKEN_TYPE_STRING) {
@@ -255,7 +258,7 @@ static ASTNode* parseSetStatement(Parser* p) {
 }
 
 static ASTNode* parseBlockStatement(Parser* p) {
-    ASTNode* block = ASTNode_create(AST_BLOCK_STATEMENT);
+    ASTNode* block = ASTNode_create_loc(AST_BLOCK_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); // consume {
     while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
         ASTNode* stmt = parseStatement(p);
@@ -268,7 +271,7 @@ static ASTNode* parseBlockStatement(Parser* p) {
 }
 
 static ASTNode* parseIfStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_IF_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_IF_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p);
     stmt->left = parseExpression(p, PREC_LOWEST);
     if (p->curToken.type == TOKEN_LBRACE) stmt->right = parseBlockStatement(p);
@@ -276,7 +279,7 @@ static ASTNode* parseIfStatement(Parser* p) {
 }
 
 static ASTNode* parseWhileStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_WHILE_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_WHILE_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p);
     stmt->left = parseExpression(p, PREC_LOWEST);
     if (p->curToken.type == TOKEN_LBRACE) stmt->right = parseBlockStatement(p);
@@ -284,7 +287,7 @@ static ASTNode* parseWhileStatement(Parser* p) {
 }
 
 static ASTNode* parseFunctionDeclaration(Parser* p) {
-    ASTNode* func = ASTNode_create(AST_FUNCTION_DECLARATION);
+    ASTNode* func = ASTNode_create_loc(AST_FUNCTION_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'def'
     func->value = strdup(p->curToken.literal);
     nextToken(p); // consume name
@@ -292,7 +295,7 @@ static ASTNode* parseFunctionDeclaration(Parser* p) {
     if (p->curToken.type == TOKEN_LPAREN) {
         nextToken(p); // consume '('
         while (p->curToken.type != TOKEN_RPAREN && p->curToken.type != TOKEN_EOF) {
-            ASTNode* param = ASTNode_create(AST_IDENTIFIER);
+            ASTNode* param = ASTNode_create_loc(AST_IDENTIFIER, p->curToken.line, p->curToken.file);
             if (p->curToken.type == TOKEN_TYPE_INT || p->curToken.type == TOKEN_TYPE_STRING) {
                 param->typeAnnotation = strdup(p->curToken.literal);
                 nextToken(p);
@@ -313,7 +316,7 @@ static ASTNode* parseFunctionDeclaration(Parser* p) {
 }
 
 static ASTNode* parseReturnStatement(Parser* p) {
-    ASTNode* ret = ASTNode_create(AST_RETURN_STATEMENT);
+    ASTNode* ret = ASTNode_create_loc(AST_RETURN_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'return'
     if (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
         ret->left = parseExpression(p, PREC_LOWEST);
@@ -322,7 +325,7 @@ static ASTNode* parseReturnStatement(Parser* p) {
 }
 
 static ASTNode* parseTryStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_TRY_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_TRY_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'try'
     if (p->curToken.type == TOKEN_LBRACE) {
         stmt->left = parseBlockStatement(p);
@@ -345,7 +348,7 @@ static ASTNode* parseTryStatement(Parser* p) {
 }
 
 static ASTNode* parseImportStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_IMPORT_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_IMPORT_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'import'
     if (p->curToken.type == TOKEN_STRING) {
         stmt->value = strdup(p->curToken.literal);
@@ -358,16 +361,17 @@ static ASTNode* parseImportStatement(Parser* p) {
 
 static ASTNode* parseExpressionStatement(Parser* p) {
     if (p->curToken.type == TOKEN_SHOW) {
-        ASTNode* stmt = ASTNode_create(AST_EXPRESSION_STATEMENT);
-        ASTNode* call = ASTNode_create(AST_CALL_EXPRESSION);
-        call->left = ASTNode_create(AST_IDENTIFIER);
+        ASTNode* stmt = ASTNode_create_loc(AST_EXPRESSION_STATEMENT, p->curToken.line, p->curToken.file);
+        ASTNode* call = ASTNode_create_loc(AST_CALL_EXPRESSION, p->curToken.line, p->curToken.file);
+        call->left = ASTNode_create_loc(AST_IDENTIFIER, p->curToken.line, p->curToken.file);
         call->left->value = strdup("show");
         
         nextToken(p);
         if (p->curToken.type != TOKEN_LPAREN) return NULL;
         nextToken(p);
         
-        call->right = parseExpression(p, PREC_LOWEST);
+        ASTNode* arg = parseExpression(p, PREC_LOWEST);
+        if (arg) ASTNode_addParameter(call, arg);
         
         if (p->curToken.type != TOKEN_RPAREN) return NULL;
         nextToken(p);
@@ -375,14 +379,14 @@ static ASTNode* parseExpressionStatement(Parser* p) {
         stmt->left = call;
         return stmt;
     }
-    ASTNode* stmt = ASTNode_create(AST_EXPRESSION_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_EXPRESSION_STATEMENT, p->curToken.line, p->curToken.file);
     stmt->left = parseExpression(p, PREC_LOWEST);
     return stmt;
 }
 
 // GwareWeb Parsing
 static ASTNode* parseActionDeclaration(Parser* p) {
-    ASTNode* action = ASTNode_create(AST_ACTION_DECLARATION);
+    ASTNode* action = ASTNode_create_loc(AST_ACTION_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'action'
     action->value = strdup(p->curToken.literal);
     nextToken(p); // consume name
@@ -391,12 +395,12 @@ static ASTNode* parseActionDeclaration(Parser* p) {
 }
 
 static ASTNode* parseStyleDeclaration(Parser* p) {
-    ASTNode* style = ASTNode_create(AST_STYLE_DECLARATION);
+    ASTNode* style = ASTNode_create_loc(AST_STYLE_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'style'
     nextToken(p); // consume '{'
     
     while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
-        ASTNode* prop = ASTNode_create(AST_CSS_PROPERTY);
+        ASTNode* prop = ASTNode_create_loc(AST_CSS_PROPERTY, p->curToken.line, p->curToken.file);
         prop->propertyName = strdup(p->curToken.literal);
         nextToken(p); // consume name
         
@@ -413,14 +417,14 @@ static ASTNode* parseStyleDeclaration(Parser* p) {
 
 static ASTNode* parseUIElement(Parser* p) {
     // e.g. button(onClick: increment) { show(clicks) }
-    ASTNode* el = ASTNode_create(AST_UI_ELEMENT);
+    ASTNode* el = ASTNode_create_loc(AST_UI_ELEMENT, p->curToken.line, p->curToken.file);
     el->value = strdup(p->curToken.literal);
     nextToken(p); // consume tag name
     
     if (p->curToken.type == TOKEN_LPAREN) {
         nextToken(p); // consume '('
         while (p->curToken.type != TOKEN_RPAREN && p->curToken.type != TOKEN_EOF) {
-            ASTNode* attr = ASTNode_create(AST_IDENTIFIER);
+            ASTNode* attr = ASTNode_create_loc(AST_IDENTIFIER, p->curToken.line, p->curToken.file);
             attr->propertyName = strdup(p->curToken.literal);
             nextToken(p); // consume attr name
             if (p->curToken.type == TOKEN_COLON || p->curToken.type == TOKEN_ASSIGN) nextToken(p);
@@ -442,7 +446,7 @@ static ASTNode* parseUIElement(Parser* p) {
     }
     
     if (p->curToken.type == TOKEN_LBRACE) {
-        ASTNode* block = ASTNode_create(AST_BLOCK_STATEMENT);
+        ASTNode* block = ASTNode_create_loc(AST_BLOCK_STATEMENT, p->curToken.line, p->curToken.file);
         nextToken(p); // consume {
         while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
             if (p->curToken.type == TOKEN_SHOW) {
@@ -463,11 +467,11 @@ static ASTNode* parseUIElement(Parser* p) {
 }
 
 static ASTNode* parseUIIfStatement(Parser* p) {
-    ASTNode* stmt = ASTNode_create(AST_IF_STATEMENT);
+    ASTNode* stmt = ASTNode_create_loc(AST_IF_STATEMENT, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'if'
     stmt->left = parseExpression(p, PREC_LOWEST);
     if (p->curToken.type == TOKEN_LBRACE) {
-        ASTNode* block = ASTNode_create(AST_BLOCK_STATEMENT);
+        ASTNode* block = ASTNode_create_loc(AST_BLOCK_STATEMENT, p->curToken.line, p->curToken.file);
         nextToken(p); // consume {
         while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
             if (p->curToken.type == TOKEN_SHOW) {
@@ -488,7 +492,7 @@ static ASTNode* parseUIIfStatement(Parser* p) {
 }
 
 static ASTNode* parseViewDeclaration(Parser* p) {
-    ASTNode* view = ASTNode_create(AST_VIEW_DECLARATION);
+    ASTNode* view = ASTNode_create_loc(AST_VIEW_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'view'
     nextToken(p); // consume '{'
     while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
@@ -505,7 +509,7 @@ static ASTNode* parseViewDeclaration(Parser* p) {
 }
 
 static ASTNode* parseComponentDeclaration(Parser* p) {
-    ASTNode* comp = ASTNode_create(AST_COMPONENT_DECLARATION);
+    ASTNode* comp = ASTNode_create_loc(AST_COMPONENT_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'component'
     comp->value = strdup(p->curToken.literal);
     nextToken(p); // consume name
@@ -529,7 +533,7 @@ static ASTNode* parseComponentDeclaration(Parser* p) {
 }
 
 static ASTNode* parseStoreDeclaration(Parser* p) {
-    ASTNode* store = ASTNode_create(AST_STORE_DECLARATION);
+    ASTNode* store = ASTNode_create_loc(AST_STORE_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'store'
     store->value = strdup(p->curToken.literal);
     nextToken(p); // consume name
@@ -538,13 +542,13 @@ static ASTNode* parseStoreDeclaration(Parser* p) {
 }
 
 static ASTNode* parseRouterDeclaration(Parser* p) {
-    ASTNode* router = ASTNode_create(AST_ROUTER_DECLARATION);
+    ASTNode* router = ASTNode_create_loc(AST_ROUTER_DECLARATION, p->curToken.line, p->curToken.file);
     nextToken(p); // consume 'router'
     if (p->curToken.type == TOKEN_LBRACE) {
         nextToken(p); // consume '{'
         while (p->curToken.type != TOKEN_RBRACE && p->curToken.type != TOKEN_EOF) {
             if (p->curToken.type == TOKEN_ROUTE) {
-                ASTNode* route = ASTNode_create(AST_ROUTE_DECLARATION);
+                ASTNode* route = ASTNode_create_loc(AST_ROUTE_DECLARATION, p->curToken.line, p->curToken.file);
                 nextToken(p); // consume 'route'
                 if (p->curToken.type == TOKEN_LPAREN) nextToken(p);
                 route->propertyName = strdup(p->curToken.literal); // path (e.g. "/")
@@ -578,7 +582,7 @@ static ASTNode* parseStatement(Parser* p) {
 }
 
 ASTNode* Parser_parseProgram(Parser* p) {
-    ASTNode* program = ASTNode_create(AST_PROGRAM);
+    ASTNode* program = ASTNode_create_loc(AST_PROGRAM, p->curToken.line, p->curToken.file);
     while (p->curToken.type != TOKEN_EOF) {
         ASTNode* stmt = parseStatement(p);
         if (stmt) ASTNode_addStatement(program, stmt);

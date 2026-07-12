@@ -1,20 +1,10 @@
-set db = sqlite_open("test_bind.db")
-
-sqlite_exec(db, "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
-
-set routes = {
-    "GET /": def(req) {
-        return "<h1>Welcome to Gware!</h1>"
-    },
-    "GET /users": def(req) {
-        set rows = sqlite_query(db, "SELECT * FROM users", [])
-        return rows
-    },
-    "POST /api/users": def(req) {
-        set user = json_parse(req["body"])
-        sqlite_exec(db, "INSERT INTO users (name) VALUES (?)", [user["name"]])
-        return "Success"
-    }
+def handle_user(req) {
+    show($"User route accessed! Param ID: {req.params.id}")
+    return $"User {req.params.id}"
 }
 
-http_serve(8080, routes)
+set routes = {
+    "GET /users/:id": handle_user
+}
+
+http_serve(8080, routes, "public")

@@ -1,0 +1,12 @@
+def main() {
+    assert(1 == 1, "One should equal one")
+    assert("hello" != "world", "Strings should not be equal")
+    assert(1, "1 is true")
+    
+    // Testing array assertion
+    set arr = [1, 2, 3]
+    assert(arr[0] == 1, "First element is 1")
+    
+    show("Assert tests passed")
+}
+main()

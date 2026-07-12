@@ -1,0 +1,2 @@
+set t = date.now()
+show(date.format(t, "%Y-%m-%d %H:%M:%S"))

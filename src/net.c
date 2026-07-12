@@ -19,11 +19,13 @@
     #define closesocket close
 #endif
 
-char* fetch_url(const char* url) {
+char* fetch_url_ext(const char* url, const char* method, const char* body) {
     if (strncmp(url, "http://", 7) != 0) {
         printf("Error: Only http:// is supported natively\n");
         return NULL;
     }
+    
+    if (!method) method = "GET";
 
 #ifdef _WIN32
     WSADATA wsaData;
@@ -78,13 +80,25 @@ char* fetch_url(const char* url) {
         return NULL;
     }
 
-    char request[2048];
-    snprintf(request, sizeof(request), 
-             "GET %s HTTP/1.1\r\n"
-             "Host: %s\r\n"
-             "Connection: close\r\n"
-             "User-Agent: Gware/0.0.0.6\r\n"
-             "\r\n", path, hostname);
+    char request[4096];
+    if (body) {
+        snprintf(request, sizeof(request), 
+                 "%s %s HTTP/1.1\r\n"
+                 "Host: %s\r\n"
+                 "Connection: close\r\n"
+                 "User-Agent: Gware/0.0.0.9\r\n"
+                 "Content-Length: %zu\r\n"
+                 "Content-Type: application/json\r\n"
+                 "\r\n"
+                 "%s", method, path, hostname, strlen(body), body);
+    } else {
+        snprintf(request, sizeof(request), 
+                 "%s %s HTTP/1.1\r\n"
+                 "Host: %s\r\n"
+                 "Connection: close\r\n"
+                 "User-Agent: Gware/0.0.0.9\r\n"
+                 "\r\n", method, path, hostname);
+    }
 
     send(sock, request, strlen(request), 0);
 
@@ -109,10 +123,10 @@ char* fetch_url(const char* url) {
 #endif
 
     // Strip HTTP headers
-    char* body = strstr(buf, "\r\n\r\n");
-    if (body) {
-        body += 4;
-        char* final_body = strdup(body);
+    char* resp_body = strstr(buf, "\r\n\r\n");
+    if (resp_body) {
+        resp_body += 4;
+        char* final_body = strdup(resp_body);
         free(buf);
         return final_body;
     }

@@ -6,9 +6,9 @@
 typedef enum {
     VAL_INT,
     VAL_STRING,
-    VAL_FUNCTION,
     VAL_ARRAY,
     VAL_OBJECT,
+    VAL_FUNCTION,
     VAL_NATIVE_FUNCTION
 } ValueType;
 
@@ -28,6 +28,8 @@ typedef struct Value (*NativeFn)(int argCount, struct Value* args);
 typedef struct Value {
     ValueType type;
     int is_return;
+    int is_break;
+    int is_continue;
     union {
         int int_val;
         char* str_val;
@@ -57,6 +59,7 @@ typedef struct ValueObject {
 typedef struct Environment {
     char** names;
     char** types;
+    int* is_const;
     struct Value* values;
     int count;
     int capacity;
@@ -72,10 +75,13 @@ Value createInt(int i);
 Value createString(char* s);
 Value createArray(int capacity);
 Value createObject(int capacity);
+Value createNativeFunction(NativeFn fn);
+void Object_set_value(struct ValueObject* obj, const char* key, Value val);
 
 Environment* get_global_env(void);
-Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv);
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv, Value* thisObj);
 Environment* Environment_create(Environment* parent);
+void Environment_define(Environment* env, char* name, Value value, char* typeAnnotation, int isConst);
 void Environment_set(Environment* env, char* name, Value value, char* typeAnnotation);
 Value Environment_get(Environment* env, char* name, int* found);
 Value* Environment_get_ref(Environment* env, char* name);
@@ -83,7 +89,7 @@ void Environment_destroy(Environment* env);
 void gc_collect(void);
 
 Value Eval_node(struct ASTNode* node, Environment* env);
-Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv);
+Value invokeFunction(Value funcVal, int argCount, Value* args, Environment* parentEnv, Value* thisObj);
 void throw_error(const char* fmt, ...);
 
 #endif // EVAL_H

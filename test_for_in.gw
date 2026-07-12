@@ -1,0 +1,4 @@
+set my_array = [10, 20, 30, 40]
+for (item in my_array) {
+    show($"Item is: {item}")
+}

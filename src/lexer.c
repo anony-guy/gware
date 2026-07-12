@@ -8,6 +8,7 @@ static void Lexer_readChar(Lexer* l) {
         l->ch = 0; // EOF
     } else {
         l->ch = l->input[l->readPosition];
+        if (l->ch == '\n') l->line++;
     }
     l->position = l->readPosition;
     l->readPosition += 1;
@@ -21,11 +22,13 @@ static char Lexer_peekChar(Lexer* l) {
     }
 }
 
-Lexer* Lexer_create(char* input) {
+Lexer* Lexer_create(char* input, const char* file) {
     Lexer* l = (Lexer*)malloc(sizeof(Lexer));
     l->input = strdup(input);
     l->position = 0;
     l->readPosition = 0;
+    l->line = 1;
+    l->file = file ? strdup(file) : NULL;
     Lexer_readChar(l);
     return l;
 }
@@ -33,16 +36,21 @@ Lexer* Lexer_create(char* input) {
 void Lexer_destroy(Lexer* l) {
     if (l) {
         free(l->input);
+        free(l->file);
         free(l);
     }
 }
 
-static Token newToken(TokenType type, char* literal) {
+static Token newTokenInternal(GwTokenType type, char* literal, Lexer* l) {
     Token t;
     t.type = type;
-    t.literal = strdup(literal);
+    t.literal = literal ? strdup(literal) : NULL;
+    t.line = l ? l->line : 0;
+    t.file = l ? (l->file ? strdup(l->file) : NULL) : NULL;
     return t;
 }
+
+#define newToken(type, literal) newTokenInternal(type, literal, l)
 
 static void skipWhitespace(Lexer* l) {
     while (l->ch == ' ' || l->ch == '\t' || l->ch == '\n' || l->ch == '\r') {
@@ -103,13 +111,20 @@ static char* readString(Lexer* l) {
     return str;
 }
 
-static TokenType lookupIdent(char* ident) {
+static GwTokenType lookupIdent(char* ident) {
     if (strcmp(ident, "set") == 0) return TOKEN_SET;
     if (strcmp(ident, "show") == 0) return TOKEN_SHOW;
     if (strcmp(ident, "if") == 0) return TOKEN_IF;
+    if (strcmp(ident, "else") == 0) return TOKEN_ELSE;
     if (strcmp(ident, "while") == 0) return TOKEN_WHILE;
+    if (strcmp(ident, "for") == 0) return TOKEN_FOR;
+    if (strcmp(ident, "in") == 0) return TOKEN_IN;
     if (strcmp(ident, "def") == 0) return TOKEN_DEF;
     if (strcmp(ident, "return") == 0) return TOKEN_RETURN;
+    if (strcmp(ident, "break") == 0) return TOKEN_BREAK;
+    if (strcmp(ident, "continue") == 0) return TOKEN_CONTINUE;
+    if (strcmp(ident, "const") == 0) return TOKEN_CONST;
+    if (strcmp(ident, "import") == 0) return TOKEN_IMPORT;
     if (strcmp(ident, "import") == 0) return TOKEN_IMPORT;
     if (strcmp(ident, "try") == 0) return TOKEN_TRY;
     if (strcmp(ident, "catch") == 0) return TOKEN_CATCH;
@@ -127,7 +142,7 @@ static TokenType lookupIdent(char* ident) {
 }
 
 Token Lexer_nextToken(Lexer* l) {
-    Token tok;
+    Token tok = {0};
     skipWhitespace(l);
 
     switch (l->ch) {
@@ -135,16 +150,52 @@ Token Lexer_nextToken(Lexer* l) {
             if (Lexer_peekChar(l) == '=') {
                 Lexer_readChar(l);
                 tok = newToken(TOKEN_EQUALS, "==");
+            } else if (Lexer_peekChar(l) == '>') {
+                Lexer_readChar(l);
+                tok = newToken(TOKEN_ARROW, "=>");
             } else {
                 tok = newToken(TOKEN_ASSIGN, "="); 
+            }
+            break;
+        case '!':
+            if (Lexer_peekChar(l) == '=') {
+                Lexer_readChar(l);
+                tok = newToken(TOKEN_NOT_EQ, "!=");
+            } else {
+                tok = newToken(TOKEN_ILLEGAL, "!");
             }
             break;
         case '+': tok = newToken(TOKEN_PLUS, "+"); break;
         case '-': tok = newToken(TOKEN_MINUS, "-"); break;
         case '*': tok = newToken(TOKEN_STAR, "*"); break;
-        case '/': tok = newToken(TOKEN_SLASH, "/"); break;
-        case '<': tok = newToken(TOKEN_LESS, "<"); break;
-        case '>': tok = newToken(TOKEN_GREATER, ">"); break;
+        case '/': 
+            if (Lexer_peekChar(l) == '/') {
+                while (l->ch != '\n' && l->ch != 0) {
+                    Lexer_readChar(l);
+                }
+                return Lexer_nextToken(l);
+            }
+            tok = newToken(TOKEN_SLASH, "/"); 
+            break;
+        case '<': 
+            if (Lexer_peekChar(l) == '<') {
+                Lexer_readChar(l);
+                tok = newToken(TOKEN_SHL, "<<");
+            } else {
+                tok = newToken(TOKEN_LESS, "<"); 
+            }
+            break;
+        case '>': 
+            if (Lexer_peekChar(l) == '>') {
+                Lexer_readChar(l);
+                tok = newToken(TOKEN_SHR, ">>");
+            } else {
+                tok = newToken(TOKEN_GREATER, ">"); 
+            }
+            break;
+        case '&': tok = newToken(TOKEN_AMPERSAND, "&"); break;
+        case '|': tok = newToken(TOKEN_PIPE, "|"); break;
+        case '^': tok = newToken(TOKEN_CARET, "^"); break;
         case '.': tok = newToken(TOKEN_DOT, "."); break;
         case '(': tok = newToken(TOKEN_LPAREN, "("); break;
         case ')': tok = newToken(TOKEN_RPAREN, ")"); break;
@@ -153,21 +204,40 @@ Token Lexer_nextToken(Lexer* l) {
         case '[': tok = newToken(TOKEN_LBRACKET, "["); break;
         case ']': tok = newToken(TOKEN_RBRACKET, "]"); break;
         case ':': tok = newToken(TOKEN_COLON, ":"); break;
+        case '?': tok = newToken(TOKEN_QUESTION, "?"); break;
 
         case ',': tok = newToken(TOKEN_COMMA, ","); break;
         case '"':
             tok.literal = readString(l);
             tok.type = TOKEN_STRING;
+            tok.line = l ? l->line : 0;
+            tok.file = l ? (l->file ? strdup(l->file) : NULL) : NULL;
+            break;
+        case '$':
+            if (Lexer_peekChar(l) == '"') {
+                Lexer_readChar(l);
+                tok.literal = readString(l);
+                tok.type = TOKEN_INTERP_STRING;
+                tok.line = l ? l->line : 0;
+                tok.file = l ? (l->file ? strdup(l->file) : NULL) : NULL;
+            } else {
+                char str[2] = {'$', '\0'};
+                tok = newToken(TOKEN_ILLEGAL, str);
+            }
             break;
         case 0:   tok = newToken(TOKEN_EOF, ""); break;
         default:
             if (isalpha(l->ch)) {
                 tok.literal = readIdentifier(l);
                 tok.type = lookupIdent(tok.literal);
+                tok.line = l ? l->line : 0;
+                tok.file = l ? (l->file ? strdup(l->file) : NULL) : NULL;
                 return tok; 
             } else if (isdigit(l->ch)) {
                 tok.literal = readNumber(l);
                 tok.type = TOKEN_NUMBER;
+                tok.line = l ? l->line : 0;
+                tok.file = l ? (l->file ? strdup(l->file) : NULL) : NULL;
                 return tok; 
             } else {
                 char str[2] = {l->ch, '\0'};

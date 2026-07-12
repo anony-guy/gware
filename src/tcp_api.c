@@ -178,7 +178,7 @@ static Value native_tcp_listen(int argCount, Value* args) {
                         argsArr[0] = createString(buffer);
                         
                         Environment* call_env = Environment_create(get_global_env());
-                        Value response = invokeFunction(callback, 1, argsArr, call_env);
+                        Value response = invokeFunction(callback, 1, argsArr, call_env, NULL);
                         
                         if (response.type == VAL_STRING && response.as.str_val) {
                             send(i, response.as.str_val, strlen(response.as.str_val), 0);
@@ -233,15 +233,86 @@ static Value native_ws_send(int argCount, Value* args) {
     return createNull();
 }
 
+static Value native_sse_send(int argCount, Value* args) {
+    if (argCount < 3 || args[0].type != VAL_INT || args[1].type != VAL_STRING || args[2].type != VAL_STRING) return createNull();
+    char buffer[4096];
+    snprintf(buffer, sizeof(buffer), "event: %s\ndata: %s\n\n", args[1].as.str_val, args[2].as.str_val);
+    send(args[0].as.int_val, buffer, strlen(buffer), 0);
+    return createNull();
+}
+
 static int ws_clients[4096] = {0};
 static char ws_paths[4096][256] = {{0}};
 
-static Value native_http_serve(int argCount, Value* args) {
-    if (argCount != 2 || args[0].type != VAL_INT || args[1].type != VAL_OBJECT) {
-        throw_error("http_serve expects (port, routes_object)");
+static int match_route(const char* pattern, const char* actualPath, ValueObject* params) {
+    const char* p1 = pattern;
+    const char* p2 = actualPath;
+    while (*p1 && *p2) {
+        if (*p1 == ':') {
+            p1++;
+            const char* nameStart = p1;
+            while (*p1 && *p1 != '/' && *p1 != ' ') p1++;
+            char name[128] = {0};
+            strncpy(name, nameStart, p1 - nameStart);
+            
+            const char* valStart = p2;
+            while (*p2 && *p2 != '/' && *p2 != ' ') p2++;
+            char val[512] = {0};
+            strncpy(val, valStart, p2 - valStart);
+            
+            Object_set_value(params, name, createString(val));
+        } else if (*p1 == *p2) {
+            p1++; p2++;
+        } else {
+            return 0;
+        }
     }
+    return (*p1 == '\0' && *p2 == '\0');
+}
+
+#include <sys/stat.h>
+#include <pthread.h>
+
+static SOCKET hmr_sockets[1024];
+static int hmr_socket_count = 0;
+static pthread_mutex_t hmr_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void* hmr_watcher_thread(void* arg) {
+    char* watch_path = (char*)arg;
+    struct stat st;
+    time_t last_mtime = 0;
+    if (stat(watch_path, &st) == 0) {
+        last_mtime = st.st_mtime;
+    }
+    
+    while(1) {
+#ifdef _WIN32
+        Sleep(300);
+#else
+        usleep(300000);
+#endif
+        if (stat(watch_path, &st) == 0) {
+            if (st.st_mtime != last_mtime) {
+                last_mtime = st.st_mtime;
+                pthread_mutex_lock(&hmr_mutex);
+                for (int i = 0; i < hmr_socket_count; i++) {
+                    ws_send_frame(hmr_sockets[i], "RELOAD");
+                }
+                pthread_mutex_unlock(&hmr_mutex);
+            }
+        }
+    }
+    return NULL;
+}
+
+Value native_http_serve(int argCount, Value* args) {
+    if (argCount < 2 || args[0].type != VAL_INT || args[1].type != VAL_OBJECT) return createNull();
     int port = args[0].as.int_val;
     ValueObject* routes = args[1].as.obj_val;
+    char* static_dir = NULL;
+    if (argCount >= 3 && args[2].type == VAL_STRING) {
+        static_dir = args[2].as.str_val;
+    }
 
 #ifdef _WIN32
     WSADATA wsaData;
@@ -287,6 +358,20 @@ static Value native_http_serve(int argCount, Value* args) {
     FD_ZERO(&master_set);
     FD_SET(listenSocket, &master_set);
     SOCKET max_sd = listenSocket;
+
+    int isDev = 0;
+    if (argCount >= 4 && args[3].type == VAL_INT && args[3].as.int_val == 1) {
+        isDev = 1;
+    }
+    
+    if (isDev && static_dir) {
+        char* watch_path = malloc(1024);
+        snprintf(watch_path, 1024, "%s/index.html", static_dir);
+        pthread_t hmr_thread;
+        pthread_create(&hmr_thread, NULL, hmr_watcher_thread, watch_path);
+        pthread_detach(hmr_thread);
+        printf("HMR Watcher started on %s\n", watch_path);
+    }
 
     printf("HTTP Router listening on port %d...\n", port);
     fflush(stdout);
@@ -360,7 +445,7 @@ static Value native_http_serve(int argCount, Value* args) {
                                 reqObj.as.obj_val->count = 2;
                                 Value argsArr[1]; argsArr[0] = reqObj;
                                 Environment* call_env = Environment_create(get_global_env());
-                                Value response = invokeFunction(callback, 1, argsArr, call_env);
+                                Value response = invokeFunction(callback, 1, argsArr, call_env, NULL);
                                 if (response.type == VAL_STRING && response.as.str_val) {
                                     ws_send_frame(i, response.as.str_val);
                                 }
@@ -414,6 +499,11 @@ static Value native_http_serve(int argCount, Value* args) {
                                         ws_clients[i] = 1;
                                         strncpy(ws_paths[i], path, 255);
                                     }
+                                    if (strcmp(path, "/__hmr") == 0) {
+                                        pthread_mutex_lock(&hmr_mutex);
+                                        if (hmr_socket_count < 1024) hmr_sockets[hmr_socket_count++] = i;
+                                        pthread_mutex_unlock(&hmr_mutex);
+                                    }
                                     continue;
                                 }
                             }
@@ -424,8 +514,11 @@ static Value native_http_serve(int argCount, Value* args) {
                         
                         Value callback;
                         callback.type = VAL_INT; // invalid type to indicate not found
+                        Value paramsObj = createObject(4);
+                        
                         for (int k = 0; k < routes->count; k++) {
-                            if (strcmp(routes->keys[k], routeKey) == 0) {
+                            paramsObj.as.obj_val->count = 0; // reset for each attempt
+                            if (match_route(routes->keys[k], routeKey, paramsObj.as.obj_val)) {
                                 callback = routes->values[k];
                                 break;
                             }
@@ -436,22 +529,150 @@ static Value native_http_serve(int argCount, Value* args) {
                             if (bodyStr) bodyStr += 4;
                             else bodyStr = "";
                             
-                            Value reqObj = createObject(5);
+                            Value cookiesObj = createObject(5);
+                            char* cookieStr = strstr(buffer, "Cookie: ");
+                            if (cookieStr) {
+                                cookieStr += 8;
+                                char* end = strstr(cookieStr, "\r\n");
+                                if (end) {
+                                    char cstr[1024] = {0};
+                                    strncpy(cstr, cookieStr, end - cookieStr);
+                                    char* token = strtok(cstr, "; ");
+                                    int cidx = 0;
+                                    while (token && cidx < cookiesObj.as.obj_val->capacity) {
+                                        char* eq = strchr(token, '=');
+                                        if (eq) {
+                                            *eq = 0;
+                                            cookiesObj.as.obj_val->keys[cidx] = strdup(token);
+                                            cookiesObj.as.obj_val->values[cidx] = createString(eq + 1);
+                                            cidx++;
+                                        }
+                                        token = strtok(NULL, "; ");
+                                    }
+                                    cookiesObj.as.obj_val->count = cidx;
+                                }
+                            }
+                            
+                            Value reqObj = createObject(6);
                             reqObj.as.obj_val->keys[0] = strdup("method");
                             reqObj.as.obj_val->values[0] = createString(method);
                             reqObj.as.obj_val->keys[1] = strdup("path");
                             reqObj.as.obj_val->values[1] = createString(path);
                             reqObj.as.obj_val->keys[2] = strdup("body");
                             reqObj.as.obj_val->values[2] = createString(bodyStr);
-                            reqObj.as.obj_val->count = 3;
+                            reqObj.as.obj_val->keys[3] = strdup("params");
+                            reqObj.as.obj_val->values[3] = paramsObj;
+                            reqObj.as.obj_val->keys[4] = strdup("fd");
+                            reqObj.as.obj_val->values[4] = createInt(i);
+                            reqObj.as.obj_val->keys[5] = strdup("cookies");
+                            reqObj.as.obj_val->values[5] = cookiesObj;
+                            reqObj.as.obj_val->count = 6;
                             
                             Value argsArr[1];
                             argsArr[0] = reqObj;
                             
                             Environment* call_env = Environment_create(get_global_env());
-                            Value response = invokeFunction(callback, 1, argsArr, call_env);
                             
-                            if (response.type == VAL_OBJECT || response.type == VAL_ARRAY) {
+                            Value response;
+                            response.type = VAL_STRING;
+                            response.as.str_val = NULL; // null
+                            int middleware_intercepted = 0;
+                            for (int m = 0; m < routes->count; m++) {
+                                if (strcmp(routes->keys[m], "MIDDLEWARE") == 0) {
+                                    Value mw = routes->values[m];
+                                    if (mw.type == VAL_ARRAY) {
+                                        for (int j = 0; j < mw.as.arr_val->count; j++) {
+                                            Value mw_func = mw.as.arr_val->elements[j];
+                                            if (mw_func.type == VAL_FUNCTION || mw_func.type == VAL_NATIVE_FUNCTION) {
+                                                Value mw_res = invokeFunction(mw_func, 1, argsArr, call_env, NULL);
+                                                int is_null = (mw_res.type == VAL_STRING && mw_res.as.str_val == NULL);
+                                                if (!is_null) {
+                                                    response = mw_res;
+                                                    middleware_intercepted = 1;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            
+                            if (!middleware_intercepted) {
+                                response = invokeFunction(callback, 1, argsArr, call_env, NULL);
+                            }
+
+                            
+                            int is_sse = 0;
+                            if (response.type == VAL_OBJECT) {
+                                for (int m = 0; m < response.as.obj_val->count; m++) {
+                                    if (strcmp(response.as.obj_val->keys[m], "sse") == 0) {
+                                        is_sse = 1;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (is_sse) {
+                                const char* sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
+                                send(i, sse_headers, strlen(sse_headers), 0);
+                                Environment_destroy(call_env);
+                                gc_collect();
+                                continue;
+                            }
+                            
+                            int is_advanced = 0;
+                            Value headers_obj = createNull();
+                            Value body_val = createNull();
+                            if (response.type == VAL_OBJECT) {
+                                for (int m = 0; m < response.as.obj_val->count; m++) {
+                                    if (strcmp(response.as.obj_val->keys[m], "body") == 0) {
+                                        is_advanced = 1;
+                                        body_val = response.as.obj_val->values[m];
+                                    } else if (strcmp(response.as.obj_val->keys[m], "headers") == 0) {
+                                        headers_obj = response.as.obj_val->values[m];
+                                    }
+                                }
+                            }
+                            
+                            if (is_advanced) {
+                                char resBuffer[8192] = {0};
+                                sprintf(resBuffer, "HTTP/1.1 200 OK\r\n");
+                                
+                                int has_content_type = 0;
+                                if (headers_obj.type == VAL_OBJECT) {
+                                    for (int m = 0; m < headers_obj.as.obj_val->count; m++) {
+                                        Value hval = headers_obj.as.obj_val->values[m];
+                                        if (hval.type == VAL_STRING) {
+                                            char hline[512];
+                                            snprintf(hline, sizeof(hline), "%s: %s\r\n", headers_obj.as.obj_val->keys[m], hval.as.str_val);
+                                            strcat(resBuffer, hline);
+                                            if (strcmp(headers_obj.as.obj_val->keys[m], "Content-Type") == 0) has_content_type = 1;
+                                        }
+                                    }
+                                }
+                                
+                                Value jsonStr = createNull();
+                                const char* final_body = "";
+                                if (body_val.type == VAL_STRING && body_val.as.str_val) {
+                                    final_body = body_val.as.str_val;
+                                    if (!has_content_type) strcat(resBuffer, "Content-Type: text/html\r\n");
+                                } else if (body_val.type == VAL_OBJECT || body_val.type == VAL_ARRAY) {
+                                    jsonStr = native_json_stringify(1, &body_val);
+                                    if (jsonStr.type == VAL_STRING && jsonStr.as.str_val) {
+                                        final_body = jsonStr.as.str_val;
+                                        if (!has_content_type) strcat(resBuffer, "Content-Type: application/json\r\n");
+                                    }
+                                }
+                                
+                                char clen[64];
+                                snprintf(clen, sizeof(clen), "Content-Length: %zu\r\n\r\n", strlen(final_body));
+                                strcat(resBuffer, clen);
+                                
+                                send(i, resBuffer, strlen(resBuffer), 0);
+                                send(i, final_body, strlen(final_body), 0);
+                                
+                            } else if (response.type == VAL_OBJECT || response.type == VAL_ARRAY) {
                                 Value jsonStr = native_json_stringify(1, &response);
                                 if (jsonStr.type == VAL_STRING && jsonStr.as.str_val) {
                                     char* resBuffer = malloc(strlen(jsonStr.as.str_val) + 256);
@@ -468,12 +689,46 @@ static Value native_http_serve(int argCount, Value* args) {
                                 const char* okResponse = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
                                 send(i, okResponse, strlen(okResponse), 0);
                             }
+
                             
                             Environment_destroy(call_env);
                             gc_collect();
                         } else {
-                            const char* notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found";
-                            send(i, notFound, strlen(notFound), 0);
+                            int served = 0;
+                            if (static_dir && strcmp(method, "GET") == 0) {
+                                char filePath[1024];
+                                snprintf(filePath, sizeof(filePath), "%s%s", static_dir, strcmp(path, "/") == 0 ? "/index.html" : path);
+                                FILE* f = fopen(filePath, "rb");
+                                if (f) {
+                                    fseek(f, 0, SEEK_END);
+                                    long fsize = ftell(f);
+                                    fseek(f, 0, SEEK_SET);
+                                    char* fbuf = malloc(fsize + 1);
+                                    fread(fbuf, 1, fsize, f);
+                                    fclose(f);
+                                    fbuf[fsize] = 0;
+                                    
+                                    const char* mime = "text/plain";
+                                    if (strstr(filePath, ".html")) mime = "text/html";
+                                    else if (strstr(filePath, ".css")) mime = "text/css";
+                                    else if (strstr(filePath, ".js")) mime = "application/javascript";
+                                    else if (strstr(filePath, ".png")) mime = "image/png";
+                                    else if (strstr(filePath, ".jpg")) mime = "image/jpeg";
+                                    
+                                    char* resBuffer = malloc(fsize + 512);
+                                    sprintf(resBuffer, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n\r\n", mime, fsize);
+                                    send(i, resBuffer, strlen(resBuffer), 0);
+                                    send(i, fbuf, fsize, 0);
+                                    free(resBuffer);
+                                    free(fbuf);
+                                    served = 1;
+                                }
+                            }
+                            
+                            if (!served) {
+                                const char* notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found";
+                                send(i, notFound, strlen(notFound), 0);
+                            }
                         }
                         
                         closesocket(i);
@@ -500,5 +755,8 @@ void register_tcp_api(Environment* env) {
     
     Value ws_val; ws_val.type = VAL_NATIVE_FUNCTION; ws_val.is_return = 0; ws_val.as.native_fn = native_ws_send;
     Environment_set(env, "ws_send", ws_val, NULL);
+
+    Value sse_val; sse_val.type = VAL_NATIVE_FUNCTION; sse_val.is_return = 0; sse_val.as.native_fn = native_sse_send;
+    Environment_set(env, "sse_send", sse_val, NULL);
 }
 

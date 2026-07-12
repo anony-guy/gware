@@ -1,0 +1,9 @@
+set obj = {
+    "name": "Antigravity2",
+    "greet": def() {
+        show("Hello via dot!")
+        show(this.name)
+    }
+}
+
+obj.greet()

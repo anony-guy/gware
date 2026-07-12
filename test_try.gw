@@ -1,0 +1,8 @@
+try {
+    show("Trying...")
+    show(1 / 0)
+} catch (err) {
+    show("Caught an error!")
+    show(err)
+}
+show("Execution continues...")

@@ -26,7 +26,12 @@ static Value native_sqlite_open(int argCount, Value* args) {
     if (sqlite3_open(args[0].as.str_val, &db) != SQLITE_OK) {
         throw_error("Cannot open database: %s", sqlite3_errmsg(db));
     }
-    Value v; v.type = VAL_INT; v.is_return = 0; v.as.ptr_val = db; // We use VAL_INT for type check but ptr_val for storage
+    Value v; 
+    v.type = VAL_INT; 
+    v.is_return = 0; 
+    v.is_break = 0; 
+    v.is_continue = 0; 
+    v.as.ptr_val = db; // We use VAL_INT for type check but ptr_val for storage
     return v;
 }
 
@@ -115,15 +120,19 @@ static Value native_sqlite_close(int argCount, Value* args) {
 }
 
 void register_sqlite_api(Environment* env) {
+    Value sqliteObj = createObject(4);
+    
     Value open_val; open_val.type = VAL_NATIVE_FUNCTION; open_val.is_return = 0; open_val.as.native_fn = native_sqlite_open;
-    Environment_set(env, "sqlite_open", open_val, NULL);
+    Object_set_value(sqliteObj.as.obj_val, "open", open_val);
     
     Value exec_val; exec_val.type = VAL_NATIVE_FUNCTION; exec_val.is_return = 0; exec_val.as.native_fn = native_sqlite_exec;
-    Environment_set(env, "sqlite_exec", exec_val, NULL);
+    Object_set_value(sqliteObj.as.obj_val, "exec", exec_val);
     
     Value query_val; query_val.type = VAL_NATIVE_FUNCTION; query_val.is_return = 0; query_val.as.native_fn = native_sqlite_query;
-    Environment_set(env, "sqlite_query", query_val, NULL);
+    Object_set_value(sqliteObj.as.obj_val, "query", query_val);
     
     Value close_val; close_val.type = VAL_NATIVE_FUNCTION; close_val.is_return = 0; close_val.as.native_fn = native_sqlite_close;
-    Environment_set(env, "sqlite_close", close_val, NULL);
+    Object_set_value(sqliteObj.as.obj_val, "close", close_val);
+    
+    Environment_set(env, "sqlite", sqliteObj, NULL);
 }

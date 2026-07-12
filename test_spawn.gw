@@ -1,0 +1,10 @@
+def bgTask(msg) {
+    sleep(1000)
+    show("Background task finished with message: " + msg)
+}
+
+show("Starting task...")
+spawn(bgTask, "Hello from background!")
+show("Main thread finishing...")
+sleep(2000)
+show("Done.")

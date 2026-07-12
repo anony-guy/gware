@@ -9,6 +9,7 @@ typedef enum {
     TOKEN_IDENTIFIER,
     TOKEN_NUMBER,
     TOKEN_STRING,
+    TOKEN_INTERP_STRING,
 
     // Operators
     TOKEN_ASSIGN,
@@ -19,9 +20,19 @@ typedef enum {
     
     // Comparison
     TOKEN_EQUALS,  // ==
+    TOKEN_NOT_EQ,  // !=
     TOKEN_LESS,    // <
     TOKEN_GREATER, // >
     TOKEN_DOT,     // .
+    TOKEN_QUESTION,// ?
+    TOKEN_ARROW,   // =>
+    
+    // Bitwise
+    TOKEN_AMPERSAND, // &
+    TOKEN_PIPE,      // |
+    TOKEN_CARET,     // ^
+    TOKEN_SHL,       // <<
+    TOKEN_SHR,       // >>
 
 
     // Delimiters
@@ -34,9 +45,15 @@ typedef enum {
     TOKEN_SET,
     TOKEN_SHOW,
     TOKEN_IF,
+    TOKEN_ELSE,
     TOKEN_WHILE,
+    TOKEN_FOR,
+    TOKEN_IN,
     TOKEN_DEF,
     TOKEN_RETURN,
+    TOKEN_BREAK,
+    TOKEN_CONTINUE,
+    TOKEN_CONST,
     TOKEN_TYPE_INT,
     TOKEN_TYPE_STRING,
     TOKEN_IMPORT,
@@ -60,11 +77,13 @@ typedef enum {
     TOKEN_COMMA,
     TOKEN_LBRACKET,
     TOKEN_RBRACKET
-} TokenType;
+} GwTokenType;
 
 typedef struct {
-    TokenType type;
+    GwTokenType type;
     char* literal;
+    int line;
+    char* file;
 } Token;
 
 #endif // TOKEN_H

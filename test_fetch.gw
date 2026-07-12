@@ -1,0 +1,5 @@
+set res = fetch("http://httpbin.org/post", {
+    method: "POST",
+    body: "{\"hello\": \"world\"}"
+})
+show(res)
